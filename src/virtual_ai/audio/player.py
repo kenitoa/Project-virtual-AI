@@ -9,6 +9,7 @@ import wave
 from pathlib import Path
 
 from virtual_ai.audio.base import AudioError
+from virtual_ai.audio.levels import pcm_rms
 from virtual_ai.config import AudioSettings
 
 MAX_WAV_BYTES = 100 * 1024 * 1024
@@ -82,7 +83,7 @@ class WAVPlayer:
             raise asyncio.CancelledError
         return result
 
-    async def play(self, path: Path) -> bool:
+    async def play(self, path: Path, *, levels=None) -> bool:
         if self._closed:
             raise AudioError("재생기가 종료됐습니다.")
         if not self.settings.enabled:
@@ -91,11 +92,13 @@ class WAVPlayer:
             raise AudioError("이미 재생 중입니다. 먼저 중지하세요.")
         stop = self._stop = threading.Event()
         worker = self._worker = asyncio.get_running_loop().run_in_executor(
-            None, self._play, path, stop
+            None, self._play, path, stop, levels
         )
         try:
             return await self._wait(worker, stop)
         finally:
+            if levels is not None:
+                levels.close()
             if self._worker is worker:
                 self._worker = None
 
@@ -109,7 +112,7 @@ class WAVPlayer:
         self._closed = True
         await self.stop()
 
-    def _play(self, path, stop):
+    def _play(self, path, stop, levels=None):
         pcm, channels, width, rate = _read_wav(path)
         if stop.is_set():
             return False
@@ -123,7 +126,7 @@ class WAVPlayer:
         silence = b"\x80" if width == 1 else b"\x00"
 
         def callback(outdata, frames, timing, status):
-            nonlocal position
+            nonlocal position, levels
             outdata[:] = silence * len(outdata)
             if stop.is_set():
                 raise backend.CallbackAbort
@@ -136,6 +139,12 @@ class WAVPlayer:
             except Exception:
                 errors.append(AudioError("오디오 출력 콜백이 실패했습니다."))
                 raise backend.CallbackAbort from None
+            if levels is not None:
+                try:
+                    levels.publish(pcm_rms(outdata, width), frames / rate)
+                except Exception:
+                    # Metering must never interrupt audible output.
+                    levels = None
             if position == len(pcm):
                 raise backend.CallbackStop
 

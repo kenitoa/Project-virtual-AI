@@ -17,6 +17,7 @@ from virtual_ai.expressions import select_expression
 from virtual_ai.inputs.queue import InputQueue
 from virtual_ai.integrations.vts.base import AvatarClient, AvatarError
 from virtual_ai.integrations.vts.client import VTSClient
+from virtual_ai.lipsync import MouthSync
 from virtual_ai.llm.base import LLMClient, LLMError
 from virtual_ai.llm.koboldcpp import KoboldCppClient
 from virtual_ai.llm.mock import FakeLLM
@@ -58,6 +59,7 @@ class Application:
         self.expression_policy = expression_policy
         self._avatar_available = settings.vts.enabled and avatar is not None
         self._avatar_pending = set()
+        self._mouth_session = None
         self._audio_stop_done = asyncio.Event()
         self._audio_stop_done.set()
         self.audio_directory = Path(audio_directory)
@@ -84,6 +86,8 @@ class Application:
         """Trusted local operator only; never dispatch this from model/chat text."""
         self._epoch += 1
         self.queue.clear()
+        if self._mouth_session is not None:
+            self._mouth_session.stop()
         audio_stop_done = self._audio_stop_done = asyncio.Event()
         if self._generation is not None and not self._generation.done():
             self._generation.cancel()
@@ -187,6 +191,7 @@ class Application:
         # IDs come from uuid4 above, never model output or incoming message IDs.
         destination = self.audio_directory / f"{response.response_id}.wav"
         avatar_attempted = False
+        mouth = None
 
         def cancelled():
             return (
@@ -220,7 +225,19 @@ class Application:
                 return
             started = monotonic()
             try:
-                await self.player.play(destination)
+                if self.settings.vts.lipsync_enabled and self._avatar_available:
+                    mouth = self._mouth_session = MouthSync(
+                        self.settings.vts,
+                        self._send_mouth,
+                        lambda: (
+                            not self._closed
+                            and epoch == self._epoch
+                            and self._avatar_available
+                        ),
+                    )
+                    await self.player.play(destination, levels=mouth.levels)
+                else:
+                    await self.player.play(destination)
             finally:
                 logger.info(
                     "response_id=%s playback_seconds=%.6f",
@@ -235,7 +252,7 @@ class Application:
             if avatar_attempted:
                 # Keep the process lock until cleanup settles; repeated /stop must
                 # not detach a reset that could later affect the next response.
-                cleanup = asyncio.create_task(self._reset_avatar())
+                cleanup = asyncio.create_task(self._reset_avatar(mouth))
                 interrupted = False
                 while not cleanup.done():
                     try:
@@ -245,6 +262,8 @@ class Application:
                 cleanup.result()
             else:
                 interrupted = False
+            if self._mouth_session is mouth:
+                self._mouth_session = None
             try:
                 destination.unlink(missing_ok=True)
             except OSError:
@@ -289,8 +308,19 @@ class Application:
             ):
                 raise
 
-    async def _reset_avatar(self):
+    async def _send_mouth(self, value, *, valid):
+        async def send():
+            await self.avatar.set_mouth_open(value, valid=valid)
+
+        await self._avatar_call(send, valid=valid)
+
+    async def _reset_avatar(self, mouth=None):
+        if mouth is not None:
+            mouth.stop()
+            await mouth.task
         await self._audio_stop_done.wait()
+        if mouth is not None and self._avatar_available:
+            await self._avatar_call(self.avatar.set_mouth_open, 0.0)
         if self._avatar_available:
             await self._avatar_call(self.avatar.reset)
 

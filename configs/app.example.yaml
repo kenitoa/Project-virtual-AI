@@ -34,6 +34,11 @@ vts:
   request_timeout_seconds: 2
   authentication_timeout_seconds: 60
   expected_model_id: ""  # required for expression changes; obtain with --list-hotkeys
+  lipsync_enabled: false
+  mouth_parameter: ""  # existing VTS INPUT parameter, not a Live2D parameter ID
+  lipsync_hz: 25  # maximum 30; no backlog
+  lipsync_gain: 4
+  lipsync_smoothing: 0.4  # exponential smoothing weight (0, 1]
   expression_hotkeys:
     happy: ""  # operator-selected ToggleExpression hotkey IDs
     sad: ""

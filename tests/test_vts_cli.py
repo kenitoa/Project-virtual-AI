@@ -101,7 +101,9 @@ def test_disabled_and_invalid_cli(tmp_path, arguments, code):
     assert not (tmp_path / ".local").exists()
 
 
-@pytest.mark.parametrize("action", ["authenticate", "list_hotkeys", "expression"])
+@pytest.mark.parametrize(
+    "action", ["authenticate", "list_hotkeys", "list_parameters", "expression"]
+)
 def test_cli_actions_and_cleanup(tmp_path, monkeypatch, action):
     calls = []
 
@@ -115,6 +117,10 @@ def test_cli_actions_and_cleanup(tmp_path, monkeypatch, action):
         async def list_hotkeys(self):
             calls.append("list")
             return {"modelID": "test", "availableHotkeys": []}
+
+        async def list_parameters(self):
+            calls.append("parameters")
+            return {"modelID": "test", "parameters": []}
 
         async def set_expression(self, expression):
             calls.append(expression)
@@ -130,6 +136,7 @@ def test_cli_actions_and_cleanup(tmp_path, monkeypatch, action):
         config=str(config(tmp_path, enabled=True)),
         authenticate=action == "authenticate",
         list_hotkeys=action == "list_hotkeys",
+        list_parameters=action == "list_parameters",
         expression="happy",
         hold_seconds=0.001,
     )

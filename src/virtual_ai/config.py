@@ -20,10 +20,37 @@ class VTSSettings:
     authentication_timeout_seconds: float = 60
     expected_model_id: str = ""
     expression_hotkeys: dict = field(default_factory=lambda: {"happy": "", "sad": ""})
+    lipsync_enabled: bool = False
+    mouth_parameter: str = ""
+    lipsync_hz: float = 25
+    lipsync_gain: float = 4
+    lipsync_smoothing: float = 0.4
 
     def __post_init__(self):
         if type(self.enabled) is not bool:
             raise ValueError("vts.enabled must be a boolean")
+        if type(self.lipsync_enabled) is not bool:
+            raise ValueError("vts.lipsync_enabled must be a boolean")
+        if not isinstance(self.mouth_parameter, str) or len(self.mouth_parameter) > 128:
+            raise ValueError("vts.mouth_parameter must be an input parameter name")
+        if self.lipsync_enabled and (
+            not self.mouth_parameter.strip() or not self.expected_model_id
+        ):
+            raise ValueError("lipsync requires mouth_parameter and expected_model_id")
+        for name, upper in (
+            ("lipsync_hz", 30),
+            ("lipsync_gain", 20),
+            ("lipsync_smoothing", 1),
+        ):
+            value = getattr(self, name)
+            if (
+                type(value) not in (int, float)
+                or not math.isfinite(value)
+                or not 0 < value <= upper
+            ):
+                raise ValueError(f"vts.{name} must be positive and at most {upper}")
+        if self.lipsync_hz < 20:
+            raise ValueError("vts.lipsync_hz must be between 20 and 30")
         if not isinstance(self.url, str):
             raise ValueError("vts.url must be a local WebSocket URL")
         url = urlsplit(self.url)

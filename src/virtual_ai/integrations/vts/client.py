@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import math
 import os
 import tempfile
 from pathlib import Path
@@ -82,6 +83,8 @@ class VTSClient:
         self._close_task = None
         self._model_id = None
         self._owned = set()
+        self._mouth_validated = False
+        self._mouth_touched = False
 
     async def _request(self, kind, data=None, timeout=None):
         if self._ws is None or self._broken:
@@ -287,6 +290,88 @@ class VTSClient:
             entries = await self._hotkeys()
             return {"modelID": self._model_id, "availableHotkeys": entries}
 
+    async def list_parameters(self):
+        async with self._lock:
+            self._require_ready()
+            return await self._parameters()
+
+    async def _parameters(self):
+        data = await self._request("InputParameterList")
+        self._check_model(data)
+        entries = []
+        for group in ("defaultParameters", "customParameters"):
+            if not isinstance(data.get(group), list):
+                raise AvatarError("Invalid VTS input parameter list.")
+            entries.extend(data[group])
+        seen = set()
+        for entry in entries:
+            if (
+                not isinstance(entry, dict)
+                or not _text(entry.get("name"), 128)
+                or entry["name"] in seen
+            ):
+                raise AvatarError("Invalid VTS input parameter entry.")
+            if any(
+                type(entry.get(key)) not in (int, float)
+                or not math.isfinite(entry[key])
+                for key in ("min", "max")
+            ):
+                raise AvatarError("Invalid VTS input parameter range.")
+            seen.add(entry["name"])
+        return {"modelID": self._model_id, "parameters": entries}
+
+    async def set_mouth_open(self, value: float, *, valid=None) -> None:
+        async with self._lock:
+            self._require_ready()
+            if valid is not None and not valid():
+                return
+            if not self.settings.lipsync_enabled or not self.settings.expected_model_id:
+                raise AvatarError(
+                    "Lip sync is disabled or the expected model is missing."
+                )
+            if (
+                type(value) not in (float, int)
+                or not math.isfinite(value)
+                or not 0 <= value <= 1
+            ):
+                raise AvatarError("Mouth value must be between zero and one.")
+            await self._current_model()
+            if not self._mouth_validated:
+                data = await self._parameters()
+                entry = next(
+                    (
+                        p
+                        for p in data["parameters"]
+                        if p["name"] == self.settings.mouth_parameter
+                    ),
+                    None,
+                )
+                if entry is None or not entry["min"] <= 0 < 1 <= entry["max"]:
+                    raise AvatarError(
+                        "Configured VTS input parameter must exist and support 0..1."
+                    )
+                self._mouth_validated = True
+            if valid is None or valid():
+                await self._inject_mouth(value)
+
+    async def _inject_mouth(self, value):
+        self._mouth_touched = True
+        await self._request(
+            "InjectParameterData",
+            {
+                "mode": "set",
+                "parameterValues": [
+                    {
+                        "id": self.settings.mouth_parameter,
+                        "value": float(value),
+                        "weight": 1.0,
+                    }
+                ],
+            },
+        )
+        if value == 0:
+            self._mouth_touched = False
+
     async def _states(self):
         data = await self._request("ExpressionState", {"details": False})
         self._check_model(data)
@@ -400,11 +485,14 @@ class VTSClient:
         async with self._lock:
             self._closed = True
             try:
-                if self._owned and self._broken:
+                if (self._owned or self._mouth_touched) and self._broken:
                     raise AvatarError(
                         "Expression result uncertain; reset manually in VTube Studio."
                     )
                 if self._ready:
+                    if self._mouth_touched:
+                        await self._current_model()
+                        await self._inject_mouth(0)
                     await self._reset()
             finally:
                 await self._disconnect()

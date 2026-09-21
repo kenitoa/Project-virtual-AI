@@ -9,7 +9,7 @@ class AudioError(Exception):
 
 
 class AudioPlayer(Protocol):
-    async def play(self, path: Path) -> bool:
+    async def play(self, path: Path, *, levels=None) -> bool:
         """Return True after draining, False after stop; reject overlapping play."""
         ...
 

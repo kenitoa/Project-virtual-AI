@@ -23,6 +23,10 @@ async def run(args):
             print("VTS authentication saved. Use --list-hotkeys to inspect the model.")
         elif args.list_hotkeys:
             print(json.dumps(await client.list_hotkeys(), ensure_ascii=True, indent=2))
+        elif getattr(args, "list_parameters", False):
+            print(
+                json.dumps(await client.list_parameters(), ensure_ascii=True, indent=2)
+            )
         else:
             await client.set_expression(args.expression)
             print(f"VTS expression: {args.expression}", flush=True)
@@ -50,6 +54,7 @@ def main():
     action = parser.add_mutually_exclusive_group(required=True)
     action.add_argument("--authenticate", action="store_true")
     action.add_argument("--list-hotkeys", action="store_true")
+    action.add_argument("--list-parameters", action="store_true")
     action.add_argument("--expression", choices=("happy", "sad", "neutral"))
     parser.add_argument("--hold-seconds", type=_duration, default=3)
     args = parser.parse_args()
