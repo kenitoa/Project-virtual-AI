@@ -1,6 +1,7 @@
 import asyncio
 import json
 import math
+import time
 from dataclasses import replace
 
 import pytest
@@ -114,7 +115,7 @@ def test_sender_latest_only_rate_limit_smoothing_and_silence():
 
         async def send(value, *, valid):
             if valid():
-                calls.append((asyncio.get_running_loop().time(), value))
+                calls.append((time.perf_counter(), value))
                 sent.set()
 
         session = MouthSync(

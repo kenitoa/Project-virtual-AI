@@ -1,6 +1,7 @@
 """Latest-only, rate-limited mouth updates; no audio or network work in callbacks."""
 
 import asyncio
+import time
 
 from virtual_ai.audio.levels import PlaybackLevels
 
@@ -28,9 +29,15 @@ class MouthSync:
                 await self.send(
                     value, valid=lambda: not self.stopped.is_set() and self.valid()
                 )
-            try:
-                await asyncio.wait_for(
-                    self.stopped.wait(), 1 / self.settings.lipsync_hz
-                )
-            except TimeoutError:
-                pass
+            # Windows 3.11's event-loop clock may wake timers one tick early.
+            # Recheck a high-resolution deadline instead of sending another frame.
+            deadline = time.perf_counter() + 1 / self.settings.lipsync_hz
+            while not self.stopped.is_set():
+                remaining = deadline - time.perf_counter()
+                if remaining <= 0:
+                    break
+                delay = max(remaining, time.get_clock_info("monotonic").resolution)
+                try:
+                    await asyncio.wait_for(self.stopped.wait(), delay)
+                except TimeoutError:
+                    pass
