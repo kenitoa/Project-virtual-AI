@@ -5,6 +5,7 @@ import asyncio
 import logging
 import sys
 from contextlib import AsyncExitStack
+from dataclasses import replace
 from pathlib import Path
 from time import monotonic
 from uuid import uuid4
@@ -12,7 +13,10 @@ from uuid import uuid4
 from virtual_ai.audio.base import AudioError, AudioPlayer
 from virtual_ai.audio.player import WAVPlayer
 from virtual_ai.config import load_config
+from virtual_ai.expressions import select_expression
 from virtual_ai.inputs.queue import InputQueue
+from virtual_ai.integrations.vts.base import AvatarClient, AvatarError
+from virtual_ai.integrations.vts.client import VTSClient
 from virtual_ai.llm.base import LLMClient, LLMError
 from virtual_ai.llm.koboldcpp import KoboldCppClient
 from virtual_ai.llm.mock import FakeLLM
@@ -35,6 +39,8 @@ class Application:
         *,
         tts: TTSClient | None = None,
         player: AudioPlayer | None = None,
+        avatar: AvatarClient | None = None,
+        expression_policy=None,
         audio_directory=Path("generated_audio"),
     ):
         self.settings, self.character, self.llm = settings, character, llm
@@ -48,6 +54,12 @@ class Application:
         self._generation: asyncio.Task[str] | None = None
         self._voice: asyncio.Task | None = None
         self.tts, self.player = tts, player
+        self.avatar = avatar
+        self.expression_policy = expression_policy
+        self._avatar_available = settings.vts.enabled and avatar is not None
+        self._avatar_pending = set()
+        self._audio_stop_done = asyncio.Event()
+        self._audio_stop_done.set()
         self.audio_directory = Path(audio_directory)
         self._closed = False
         self._voice_enabled = settings.tts.enabled and settings.audio.enabled
@@ -72,15 +84,18 @@ class Application:
         """Trusted local operator only; never dispatch this from model/chat text."""
         self._epoch += 1
         self.queue.clear()
+        audio_stop_done = self._audio_stop_done = asyncio.Event()
         if self._generation is not None and not self._generation.done():
             self._generation.cancel()
         if self._voice is not None and not self._voice.done():
             self._voice.cancel()
-        if self._voice_enabled:
-            try:
+        try:
+            if self._voice_enabled:
                 await self.player.stop()
-            except AudioError:
-                logger.warning("audio_status=stop_failed")
+        except AudioError:
+            logger.warning("audio_status=stop_failed")
+        finally:
+            audio_stop_done.set()
 
     async def shutdown(self):
         """Finish in-flight cleanup before the owner closes borrowed clients."""
@@ -145,6 +160,12 @@ class Application:
             if epoch != self._epoch:
                 return None
             response = prepare_response(response_id, raw, self.settings)
+            response = replace(
+                response,
+                expression=select_expression(
+                    response, self.settings.allowed_expressions, self.expression_policy
+                ),
+            )
             self.output(response.final)
             if not response.blocked:
                 self.history.add(item.viewer, item.text, response.final)
@@ -165,6 +186,7 @@ class Application:
     async def _speak(self, response, epoch):
         # IDs come from uuid4 above, never model output or incoming message IDs.
         destination = self.audio_directory / f"{response.response_id}.wav"
+        avatar_attempted = False
 
         def cancelled():
             return (
@@ -187,6 +209,15 @@ class Application:
                 )
             if cancelled():
                 return
+            if self._avatar_available:
+                avatar_attempted = True
+                await self._avatar_call(
+                    self.avatar.set_expression,
+                    response.expression,
+                    valid=lambda: not cancelled(),
+                )
+            if cancelled():
+                return
             started = monotonic()
             try:
                 await self.player.play(destination)
@@ -201,12 +232,67 @@ class Application:
             if not cancelled():
                 self.output("음성 출력을 건너뜁니다. 텍스트 답변은 유지됩니다.")
         finally:
+            if avatar_attempted:
+                # Keep the process lock until cleanup settles; repeated /stop must
+                # not detach a reset that could later affect the next response.
+                cleanup = asyncio.create_task(self._reset_avatar())
+                interrupted = False
+                while not cleanup.done():
+                    try:
+                        await asyncio.shield(cleanup)
+                    except asyncio.CancelledError:
+                        interrupted = True
+                cleanup.result()
+            else:
+                interrupted = False
             try:
                 destination.unlink(missing_ok=True)
             except OSError:
                 logger.warning(
                     "response_id=%s audio_cleanup=failed", response.response_id
                 )
+            if interrupted:
+                raise asyncio.CancelledError
+
+    async def _avatar_call(self, method, *args, valid=None):
+        """A stalled adapter cannot block voice; quarantine uncertain sessions."""
+        if not self._avatar_available:
+            return
+
+        async def invoke():
+            if self._avatar_available and (valid is None or valid()):
+                await method(*args)
+
+        task = asyncio.create_task(invoke())
+        self._avatar_pending.add(task)
+
+        def finished(task):
+            self._avatar_pending.discard(task)
+            if not task.cancelled():
+                task.exception()  # Consume late failures without logging private details.
+
+        task.add_done_callback(finished)
+        try:
+            done, _ = await asyncio.wait(
+                {task}, timeout=self.settings.vts.request_timeout_seconds
+            )
+            if not done:
+                raise TimeoutError
+            task.result()
+        except (AvatarError, TimeoutError, asyncio.CancelledError) as exc:
+            self._avatar_available = False
+            task.cancel()
+            logger.warning("avatar_status=unknown recovery=manual")
+            if (
+                isinstance(exc, asyncio.CancelledError)
+                and asyncio.current_task().cancelling()
+            ):
+                raise
+
+    async def _reset_avatar(self):
+        await self._audio_stop_done.wait()
+        if self._avatar_available:
+            await self._avatar_call(self.avatar.reset)
 
     async def run(self):
         while not self._closed:
@@ -221,8 +307,6 @@ async def run_cli(args):
     from virtual_ai.schemas import ChatInput, Viewer
 
     settings, character = load_config(Path(args.config).resolve())
-    from dataclasses import replace
-
     if args.backend:
         settings = replace(settings, backend=args.backend)
     llm = (
@@ -237,7 +321,27 @@ async def run_cli(args):
             resources.push_async_callback(tts.aclose)
             player = WAVPlayer(settings.audio)
             resources.push_async_callback(player.aclose)
-        app = Application(settings, character, llm, tts=tts, player=player)
+        avatar = None
+        if settings.vts.enabled and settings.tts.enabled and settings.audio.enabled:
+            candidate = VTSClient(settings.vts)
+
+            async def close_avatar():
+                try:
+                    await candidate.aclose()
+                except AvatarError:
+                    logger.warning("avatar_status=unknown recovery=manual")
+
+            resources.push_async_callback(close_avatar)
+            try:
+                async with asyncio.timeout(3 * settings.vts.request_timeout_seconds):
+                    # Saved token only; never prompt for approval.
+                    await candidate.connect()
+                avatar = candidate
+            except (AvatarError, TimeoutError):
+                logger.warning("avatar_status=unknown recovery=manual")
+        app = Application(
+            settings, character, llm, tts=tts, player=player, avatar=avatar
+        )
         resources.push_async_callback(app.shutdown)
         if args.once is not None:
             if not app.submit(
