@@ -26,6 +26,7 @@ class Application:
         self._ready = asyncio.Event()
         self._lock = asyncio.Lock()
         self._epoch = 0
+        self._generation: asyncio.Task[str] | None = None
 
     def submit(self, item):
         # All chat goes through this data-only entry point, even '/stop'.
@@ -44,6 +45,8 @@ class Application:
         """Trusted local operator only; never dispatch this from model/chat text."""
         self._epoch += 1
         self.queue.clear()
+        if self._generation is not None and not self._generation.done():
+            self._generation.cancel()
 
     async def forget(self, viewer=None):
         await self.stop()
@@ -64,7 +67,16 @@ class Application:
             messages = build_messages(self.character, [], item.text)
             try:
                 llm_started = monotonic()
-                raw = await self.llm.generate(messages)
+                self._generation = asyncio.create_task(self.llm.generate(messages))
+                raw = await self._generation
+                if asyncio.current_task().cancelling():
+                    raise asyncio.CancelledError
+            except asyncio.CancelledError:
+                # A stopped response must not terminate the long-lived worker.
+                # Cancellation of the worker itself must still propagate.
+                if asyncio.current_task().cancelling() or epoch == self._epoch:
+                    raise
+                return None
             except LLMError as exc:
                 logger.warning("response_id=%s llm_status=failed", response_id)
                 if raise_errors:
@@ -73,6 +85,7 @@ class Application:
                     self.output(str(exc))
                 return None
             finally:
+                self._generation = None
                 logger.info(
                     "response_id=%s llm_seconds=%.6f",
                     response_id,

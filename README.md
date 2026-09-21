@@ -14,7 +14,10 @@ uv run --locked python -m virtual_ai --backend mock
 uv run --locked python -m virtual_ai --backend mock --once "안녕"
 ```
 
-콘솔의 `/stop`은 대기 응답을 취소하고 `/quit` 또는 EOF는 종료합니다.
+콘솔의 `/stop`은 대기열을 비우고 실행 중인 생성 작업을 취소합니다. 늦게 도착한 결과는
+출력하지 않으며 다음 입력은 계속 처리합니다. `/quit` 또는 EOF는 worker와 클라이언트를 정리하고 종료합니다.
+일반 시청자 메시지의 `/stop`은 대화 데이터로만 처리합니다.
+Python HTTP 요청 취소가 KoboldCpp의 GPU 추론 즉시 중단을 보장하지는 않습니다. 서버 측 중단은 미검증입니다.
 설정 예시는 `configs/app.example.yaml`, 캐릭터 설정은 `configs/character.yaml`입니다.
 `--config configs/app.yaml`로 별도 설정을 사용할 수 있으며 잘못된 설정은 종료 코드 2로 안내합니다.
 `character_path`는 해당 YAML 폴더 기준입니다. `fake`는 기존 명령 호환을 위한 mock 별칭입니다.
