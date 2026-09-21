@@ -21,7 +21,7 @@
 ```powershell
 python -m uv sync --locked
 python -m uv run --locked python -m virtual_ai.audio --list-devices
-python -m uv run --locked python -m virtual_ai --config configs/app.yaml
+python -m uv run --locked python -m virtual_ai --config configs/app.yaml --backend koboldcpp
 python -m uv run --locked python -m virtual_ai --config configs/app.yaml --once "짧게 한국어로 인사해 주세요."
 ```
 
@@ -79,3 +79,27 @@ LLM과 GPT-SoVITS 서버는 별도로 실행해야 합니다. 활성화 설정�
 
 실제 음성이 들리는지와 중지 후 무음은 사용자 청취 확인과 별개입니다.
 위 결과만으로 음질 또는 모든 부하 조건의 동시 실행 안정성을 확정하지 않습니다.
+
+### 통합 PR 재검증 (2026-09-21)
+
+검증 시작 시 main은 `e79b40b`, 최신 `feat/voice-pipeline`은 `5bc00ad`였습니다.
+기존 로컬 설정을 보존하고 두 활성화 값과 실제 출력 장치 목록을 확인했습니다.
+위 대화형 KoboldCpp 명령으로 일반 한국어 인사를 요청했습니다.
+
+- LLM 2.402199초, TTS 2.999782초, 재생·해제 4.815395초의 로그를 확인했습니다.
+- 음성 실패·파일 정리 오류 안내는 없었으며 해당 임시 WAV가 삭제됐습니다.
+- 재생 완료 후 `/quit`은 `application_status=closed`, 종료 코드 0이었습니다.
+- 전체 174개 테스트, Ruff 및 38개 파일 포맷 검사를 다시 통과했습니다.
+- 기반 커밋의 [Windows·Ubuntu CI](https://github.com/kenitoa/Project-virtual-AI/actions/runs/35610332159)는 모두 성공했습니다.
+
+**직접 청취는 미확인입니다.** 사용자가 현재 청취 불가로 답했습니다.
+일반 답변의 음질, 재생 중 `/stop`과 다음 질문, 합성 중 `/stop`의 늦은 재생 방지,
+재생 중 `/quit`과 재실행은 [청취 체크리스트](audio.md#통합-전-재확인-2026-09-21-기반-커밋-5bc00ad)에
+따라 실제로 듣고 결과를 추가해야 합니다. 이번 일반 실행 로그로 네 항목을 통과 처리하지 않습니다.
+
+통합 PR은 `main ← feat/voice-pipeline` 초안으로 준비합니다.
+PR #3의 head `de102bc`는 이 브랜치의 조상이므로 해당 변경이 포함됩니다.
+청취 검증 완료 전에는 main에 병합하지 않습니다.
+KoboldCpp 서버 측 생성 중단은 여전히 미구현이며 Python 작업 취소만으로 서버 정리를 보장하지 않습니다.
+이 통합의 청취 검증·병합 다음에 `fix/koboldcpp-server-abort`,
+VTube Studio 연결·인증·허용 표정, 별도 입 움직임 PR, OBS 로컬 녹화 순서로 진행합니다.
