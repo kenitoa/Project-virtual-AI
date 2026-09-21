@@ -27,3 +27,4 @@ class Response:
     final: str
     speech: str
     blocked: bool = False
+    expression: str = "neutral"

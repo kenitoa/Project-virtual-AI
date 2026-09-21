@@ -82,9 +82,15 @@ def prepare_response(response_id: str, raw: str, settings) -> Response:
     sentences = re.split(r"(?<=[.!?。！？])\s+", final)
     final = " ".join(sentences[: settings.max_sentences])
     speech = clean_speech(final)
-    return Response(response_id, raw, final, speech, not allowed)
+    return Response(
+        response_id=response_id,
+        raw=raw,
+        final=final,
+        speech=speech,
+        blocked=not allowed,
+    )
 
 
 def map_expression(value: str, allowed: tuple[str, ...]) -> str:
     """Only a known symbolic expression can reach a future avatar adapter."""
-    return value if value in allowed else "neutral"
+    return value if isinstance(value, str) and value in allowed else "neutral"
