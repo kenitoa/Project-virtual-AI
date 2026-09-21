@@ -1,11 +1,12 @@
 # character_path는 이 설정 파일의 폴더 기준입니다.
 llm:
-  backend: fake  # 현재 mock/fake만 지원; 실제 서버용 koboldcpp는 구현 예정
+  backend: fake  # mock/fake는 고정 응답, 실제 서버는 koboldcpp
   base_url: http://127.0.0.1:5001
   model: Qwen3-8B
   max_output_tokens: 256
-  timeout_seconds: 30
-  retries: 1  # 최초 시도 외 추가 시도; 최대 3
+  timeout_seconds: 30  # 연결/읽기/쓰기/풀 대기 각각의 제한
+  total_timeout_seconds: 60  # 재시도와 대기를 포함한 전체 호출 제한
+  retries: 0  # 최초 시도 외 추가 시도; 최대 3
 character_path: character.yaml
 limits:
   max_input_chars: 1000

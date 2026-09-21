@@ -15,6 +15,7 @@ class Settings:
     model: str = "Qwen3-8B"
     max_output_tokens: int = 256
     timeout_seconds: float = 30
+    total_timeout_seconds: float = 60
     retries: int = 1
     max_input_chars: int = 1000
     max_output_chars: int = 600
@@ -44,7 +45,12 @@ class Settings:
             value = getattr(self, name)
             if type(value) is not int or not low <= value <= high:
                 raise ValueError(f"{name} must be an integer in [{low}, {high}]")
-        for name in ("timeout_seconds", "history_ttl_seconds", "queue_ttl_seconds"):
+        for name in (
+            "timeout_seconds",
+            "total_timeout_seconds",
+            "history_ttl_seconds",
+            "queue_ttl_seconds",
+        ):
             value = getattr(self, name)
             if (
                 type(value) not in (int, float)
@@ -52,8 +58,8 @@ class Settings:
                 or not 0 < value <= 86400
             ):
                 raise ValueError(f"{name} must be positive and at most 86400")
-        if self.backend not in ("mock", "fake"):
-            raise ValueError("backend must be mock or fake")
+        if self.backend not in ("mock", "fake", "koboldcpp"):
+            raise ValueError("backend must be mock, fake or koboldcpp")
         if not isinstance(self.base_url, str):
             raise ValueError("base_url must be a URL")
         url = urlsplit(self.base_url)
@@ -64,10 +70,15 @@ class Settings:
             or url.password
             or url.query
             or url.fragment
+            or url.path not in ("", "/")
         ):
             raise ValueError(
-                "base_url must be an HTTP(S) server URL without credentials/query"
+                "base_url must be an HTTP(S) server URL without path, credentials or query"
             )
+        try:
+            url.port
+        except ValueError:
+            raise ValueError("base_url has an invalid port") from None
         if not isinstance(self.model, str) or not self.model.strip():
             raise ValueError("model must not be empty")
         for name in ("blocked_terms", "allowed_expressions"):
@@ -103,6 +114,7 @@ def load_config(path: Path) -> tuple[Settings, dict]:
             "model",
             "max_output_tokens",
             "timeout_seconds",
+            "total_timeout_seconds",
             "retries",
         },
         "limits": {

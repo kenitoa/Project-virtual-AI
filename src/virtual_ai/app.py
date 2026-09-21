@@ -10,6 +10,7 @@ from uuid import uuid4
 from virtual_ai.config import load_config
 from virtual_ai.inputs.queue import InputQueue
 from virtual_ai.llm.base import LLMClient, LLMError
+from virtual_ai.llm.koboldcpp import KoboldCppClient
 from virtual_ai.llm.mock import FakeLLM
 from virtual_ai.prompting import build_messages
 from virtual_ai.safety import prepare_response
@@ -47,7 +48,7 @@ class Application:
     async def forget(self, viewer=None):
         await self.stop()
 
-    async def process_next(self):
+    async def process_next(self, *, raise_errors=False):
         async with self._lock:
             queued = self.queue.pop_timed()
             if queued is None:
@@ -66,6 +67,8 @@ class Application:
                 raw = await self.llm.generate(messages)
             except LLMError as exc:
                 logger.warning("response_id=%s llm_status=failed", response_id)
+                if raise_errors:
+                    raise
                 if epoch == self._epoch:
                     self.output(str(exc))
                 return None
@@ -98,7 +101,9 @@ async def run_cli(args):
 
     if args.backend:
         settings = replace(settings, backend=args.backend)
-    llm = FakeLLM()
+    llm = (
+        FakeLLM() if settings.backend in ("mock", "fake") else KoboldCppClient(settings)
+    )
     app = Application(settings, character, llm)
     try:
         if args.once is not None:
@@ -106,7 +111,7 @@ async def run_cli(args):
                 ChatInput(Viewer("console", "local"), args.once, str(uuid4()))
             ):
                 raise ValueError("입력이 비었거나 길이 제한을 초과했습니다.")
-            await app.process_next()
+            await app.process_next(raise_errors=True)
         else:
             await console(app)
     finally:
@@ -120,7 +125,7 @@ async def run_cli(args):
 def main():
     parser = argparse.ArgumentParser(description="Virtual AI text conversation")
     parser.add_argument("--config", default="configs/app.example.yaml")
-    parser.add_argument("--backend", choices=("mock", "fake"))
+    parser.add_argument("--backend", choices=("mock", "fake", "koboldcpp"))
     parser.add_argument(
         "--log-level", choices=("INFO", "WARNING", "ERROR"), default="INFO"
     )
@@ -132,6 +137,8 @@ def main():
     logging.getLogger("httpx").setLevel(logging.WARNING)
     try:
         asyncio.run(run_cli(args))
+    except LLMError as exc:
+        parser.exit(1, f"LLM 오류: {exc}\n")
     except (ValueError, OSError) as exc:
         parser.exit(2, f"설정/실행 오류: {exc}\n")
     except KeyboardInterrupt:

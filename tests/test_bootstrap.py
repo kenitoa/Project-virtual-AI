@@ -4,10 +4,16 @@ import asyncio
 import logging
 import subprocess
 import sys
+from argparse import Namespace
 from pathlib import Path
 
+import httpx
+import pytest
+
+from virtual_ai import app as app_module
 from virtual_ai.app import Application
 from virtual_ai.config import load_config
+from virtual_ai.llm.koboldcpp import KoboldCppClient
 from virtual_ai.llm.mock import FakeLLM
 from virtual_ai.schemas import ChatInput, Viewer
 
@@ -85,3 +91,109 @@ def test_injected_llm_client_and_private_metrics(caplog):
     assert "llm_seconds=" in caplog.text
     assert "private-" not in caplog.text
     assert "custom answer" not in caplog.text
+
+
+@pytest.mark.parametrize("backend", ["mock", "fake"])
+def test_mock_backends_never_create_http_client(monkeypatch, backend):
+    def forbidden(*args, **kwargs):
+        pytest.fail("mock must not create a network client")
+
+    monkeypatch.setattr(httpx, "AsyncClient", forbidden)
+    asyncio.run(
+        app_module.run_cli(
+            Namespace(
+                config=str(ROOT / "configs/app.example.yaml"),
+                backend=backend,
+                once="hello",
+            )
+        )
+    )
+
+
+@pytest.mark.parametrize("status", [200, 401])
+def test_real_backend_output_failure_exit_and_close(
+    monkeypatch, capsys, caplog, status
+):
+    clients = []
+
+    def handler(request):
+        return httpx.Response(
+            status,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": "<think>private-reasoning</think>안녕하세요!"
+                        }
+                    }
+                ]
+            },
+            headers={"x-private": "secret"},
+        )
+
+    def factory(settings):
+        client = KoboldCppClient(settings, httpx.MockTransport(handler))
+        clients.append(client)
+        return client
+
+    monkeypatch.setattr(app_module, "KoboldCppClient", factory)
+    monkeypatch.setattr(
+        sys, "argv", ["virtual_ai", "--backend", "koboldcpp", "--once", "private-input"]
+    )
+    with caplog.at_level(logging.INFO):
+        if status == 200:
+            app_module.main()
+        else:
+            with pytest.raises(SystemExit) as caught:
+                app_module.main()
+            assert caught.value.code == 1
+    output = capsys.readouterr()
+    assert clients[0]._client.is_closed
+    if status == 200:
+        assert "안녕하세요" in output.out
+        assert "private-reasoning" not in output.out
+    else:
+        assert "HTTP 401" in output.err
+        assert "안녕하세요" not in output.out
+    for private in ("private-input", "private-reasoning", "안녕하세요", "secret"):
+        assert private not in caplog.text
+
+
+def test_config_selection_and_interactive_recovery(monkeypatch, tmp_path, capsys):
+    config = tmp_path / "app.yaml"
+    config.write_text(
+        f'llm:\n  backend: koboldcpp\n  retries: 0\ncharacter_path: "{(ROOT / "configs/character.yaml").as_posix()}"\n',
+        encoding="utf-8",
+    )
+    clients = []
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        if len(calls) == 1:
+            return httpx.Response(503)
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": "recovered"}}]}
+        )
+
+    def factory(settings):
+        assert settings.backend == "koboldcpp"
+        client = KoboldCppClient(settings, httpx.MockTransport(handler))
+        clients.append(client)
+        return client
+
+    async def console(app):
+        for text in ("first", "second"):
+            assert app.submit(ChatInput(Viewer("console", "local"), text, text))
+            await app.process_next()
+
+    monkeypatch.setattr(app_module, "KoboldCppClient", factory)
+    monkeypatch.setattr("virtual_ai.inputs.console.console", console)
+    asyncio.run(
+        app_module.run_cli(Namespace(config=str(config), backend=None, once=None))
+    )
+    output = capsys.readouterr().out
+    assert "HTTP 503" in output
+    assert "recovered" in output
+    assert len(calls) == 2
+    assert clients[0]._client.is_closed
