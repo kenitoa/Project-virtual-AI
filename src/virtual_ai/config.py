@@ -100,6 +100,8 @@ class Settings:
     system_prompt_path: str = str(Path(__file__).with_name("system_prompt.md"))
     timeout_seconds: float = 30
     total_timeout_seconds: float = 60
+    server_abort_enabled: bool = False
+    abort_timeout_seconds: float = 3
     retries: int = 1
     max_input_chars: int = 1000
     max_output_chars: int = 600
@@ -135,6 +137,7 @@ class Settings:
         for name in (
             "timeout_seconds",
             "total_timeout_seconds",
+            "abort_timeout_seconds",
             "history_ttl_seconds",
             "queue_ttl_seconds",
         ):
@@ -145,6 +148,10 @@ class Settings:
                 or not 0 < value <= 86400
             ):
                 raise ValueError(f"{name} must be positive and at most 86400")
+        if type(self.server_abort_enabled) is not bool:
+            raise ValueError("server_abort_enabled must be a boolean")
+        if self.abort_timeout_seconds > 30:
+            raise ValueError("abort_timeout_seconds must be at most 30")
         if self.backend not in ("mock", "fake", "koboldcpp"):
             raise ValueError("backend must be mock, fake or koboldcpp")
         if self.max_output_tokens >= self.context_tokens:
@@ -197,6 +204,8 @@ def load_config(path: Path) -> tuple[Settings, dict]:
             "context_tokens",
             "timeout_seconds",
             "total_timeout_seconds",
+            "server_abort_enabled",
+            "abort_timeout_seconds",
             "retries",
         },
         "limits": {

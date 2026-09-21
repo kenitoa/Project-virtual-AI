@@ -7,6 +7,8 @@ llm:
   context_tokens: 8192  # 실제 서버 한도에 맞춤; 입력 추정치 + 출력 토큰 예약
   timeout_seconds: 30  # 연결/읽기/쓰기/풀 대기 각각의 제한
   total_timeout_seconds: 60  # 재시도와 대기를 포함한 전체 호출 제한
+  server_abort_enabled: false  # enable only after verifying keyed abort; see docs/backends.md
+  abort_timeout_seconds: 3  # separate cleanup deadline (maximum 30 seconds)
   retries: 0  # 최초 시도 외 추가 시도; 최대 3
 tts:
   enabled: false
