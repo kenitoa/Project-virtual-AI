@@ -1,6 +1,6 @@
 # character_path는 이 설정 파일의 폴더 기준입니다.
 llm:
-  backend: fake  # 실제 서버 사용 시 koboldcpp
+  backend: fake  # 현재 mock/fake만 지원; 실제 서버용 koboldcpp는 구현 예정
   base_url: http://127.0.0.1:5001
   model: Qwen3-8B
   max_output_tokens: 256
