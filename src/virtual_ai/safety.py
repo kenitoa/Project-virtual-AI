@@ -8,6 +8,19 @@ from virtual_ai.schemas import Response
 FALLBACK = "이 답변은 출력할 수 없어요. 다른 이야기로 이어가 주세요."
 
 
+def contains_secret(text: str) -> bool:
+    normalized = unicodedata.normalize("NFKC", text).casefold()
+    normalized = "".join(c for c in normalized if unicodedata.category(c) != "Cf")
+    return bool(
+        re.search(
+            r"-----begin .*private key-----|\bsk-[a-z0-9_-]{16,}|"
+            r"\b(?:api[_ -]?key|password|token)[\"']?\s*[:=]\s*[\"']?\S+|"
+            r"\bbearer\s+[a-z0-9._~-]{8,}|\bgh[pousr]_[a-z0-9]{20,}",
+            normalized,
+        )
+    )
+
+
 def extract_final(raw: str) -> str:
     # A closing tag without an opening tag can occur with a prefilled template.
     if re.search(r"</think\s*>", raw, re.I):
@@ -42,11 +55,7 @@ def check_output(text: str, blocked_terms: tuple[str, ...]) -> bool:
     ):
         return False
     # Avoid reading common credential formats even when surrounded by prose.
-    return not re.search(
-        r"-----BEGIN .*PRIVATE KEY-----|\bsk-[a-z0-9_-]{16,}|\b(?:api[_ -]?key|password|token)\s*[:=]\s*\S+",
-        normalized,
-        re.I,
-    )
+    return not contains_secret(text)
 
 
 def clean_speech(text: str) -> str:

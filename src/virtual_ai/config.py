@@ -14,6 +14,8 @@ class Settings:
     base_url: str = "http://127.0.0.1:5001"
     model: str = "Qwen3-8B"
     max_output_tokens: int = 256
+    context_tokens: int = 8192
+    system_prompt_path: str = str(Path(__file__).with_name("system_prompt.md"))
     timeout_seconds: float = 30
     total_timeout_seconds: float = 60
     retries: int = 1
@@ -32,6 +34,7 @@ class Settings:
     def __post_init__(self):
         bounds = {
             "max_output_tokens": (1, 4096),
+            "context_tokens": (512, 131072),
             "retries": (0, 3),
             "max_input_chars": (1, 4000),
             "max_output_chars": (1, 2000),
@@ -60,6 +63,10 @@ class Settings:
                 raise ValueError(f"{name} must be positive and at most 86400")
         if self.backend not in ("mock", "fake", "koboldcpp"):
             raise ValueError("backend must be mock, fake or koboldcpp")
+        if self.max_output_tokens >= self.context_tokens:
+            raise ValueError("context_tokens must exceed max_output_tokens")
+        if not isinstance(self.system_prompt_path, str) or not self.system_prompt_path:
+            raise ValueError("system_prompt_path must be a nonempty path")
         if not isinstance(self.base_url, str):
             raise ValueError("base_url must be a URL")
         url = urlsplit(self.base_url)
@@ -87,6 +94,7 @@ class Settings:
                 not isinstance(v, str) or not v.strip() for v in values
             ):
                 raise ValueError(f"{name} must contain nonempty strings")
+            object.__setattr__(self, name, tuple(values))
         if "neutral" not in self.allowed_expressions:
             raise ValueError("allowed_expressions must contain neutral")
 
@@ -105,6 +113,7 @@ def load_config(path: Path) -> tuple[Settings, dict]:
         "limits",
         "output",
         "character_path",
+        "system_prompt_path",
     }:
         raise ValueError("invalid app configuration")
     groups = {
@@ -113,6 +122,7 @@ def load_config(path: Path) -> tuple[Settings, dict]:
             "base_url",
             "model",
             "max_output_tokens",
+            "context_tokens",
             "timeout_seconds",
             "total_timeout_seconds",
             "retries",
@@ -139,6 +149,11 @@ def load_config(path: Path) -> tuple[Settings, dict]:
         if not isinstance(values, dict) or set(values) - allowed:
             raise ValueError(f"invalid {group} configuration")
         options.update(values)
+    if "system_prompt_path" in data:
+        prompt_path = data["system_prompt_path"]
+        if not isinstance(prompt_path, str) or not prompt_path.strip():
+            raise ValueError("system_prompt_path must be a nonempty path")
+        options["system_prompt_path"] = str((path.parent / prompt_path).resolve())
     settings = Settings(**options)
     name = data.get("character_path", "character.yaml")
     if not isinstance(name, str):

@@ -12,7 +12,8 @@ from virtual_ai.inputs.queue import InputQueue
 from virtual_ai.llm.base import LLMClient, LLMError
 from virtual_ai.llm.koboldcpp import KoboldCppClient
 from virtual_ai.llm.mock import FakeLLM
-from virtual_ai.prompting import build_messages
+from virtual_ai.memory.recent import RecentHistory
+from virtual_ai.prompting import build_messages, load_system_prompt
 from virtual_ai.safety import prepare_response
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,8 @@ class Application:
     def __init__(self, settings, character, llm: LLMClient, output=print):
         self.settings, self.character, self.llm = settings, character, llm
         self.output = output
+        self.system_prompt = load_system_prompt(settings.system_prompt_path)
+        self.history = RecentHistory(settings)
         self.queue = InputQueue(settings.queue_size, settings.queue_ttl_seconds)
         self._ready = asyncio.Event()
         self._lock = asyncio.Lock()
@@ -50,6 +53,7 @@ class Application:
 
     async def forget(self, viewer=None):
         await self.stop()
+        self.history.delete(viewer)
 
     async def process_next(self, *, raise_errors=False):
         async with self._lock:
@@ -64,9 +68,15 @@ class Application:
                 response_id,
                 monotonic() - submitted_at,
             )
-            messages = build_messages(self.character, [], item.text)
             try:
                 llm_started = monotonic()
+                messages = build_messages(
+                    self.character,
+                    self.history.messages(item.viewer),
+                    item.text,
+                    system_prompt=self.system_prompt,
+                    settings=self.settings,
+                )
                 self._generation = asyncio.create_task(self.llm.generate(messages))
                 raw = await self._generation
                 if asyncio.current_task().cancelling():
@@ -95,6 +105,8 @@ class Application:
                 return None
             response = prepare_response(response_id, raw, self.settings)
             self.output(response.final)
+            if not response.blocked:
+                self.history.add(item.viewer, item.text, response.final)
             return response
 
     async def run(self):
@@ -117,8 +129,9 @@ async def run_cli(args):
     llm = (
         FakeLLM() if settings.backend in ("mock", "fake") else KoboldCppClient(settings)
     )
-    app = Application(settings, character, llm)
+    app = None
     try:
+        app = Application(settings, character, llm)
         if args.once is not None:
             if not app.submit(
                 ChatInput(Viewer("console", "local"), args.once, str(uuid4()))
@@ -129,7 +142,8 @@ async def run_cli(args):
             await console(app)
     finally:
         try:
-            await app.stop()
+            if app is not None:
+                await app.stop()
         finally:
             await llm.aclose()
             logger.info("application_status=closed")

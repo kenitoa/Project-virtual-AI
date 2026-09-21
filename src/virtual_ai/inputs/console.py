@@ -8,7 +8,7 @@ from virtual_ai.schemas import ChatInput, Viewer
 
 
 async def console(app):
-    print("명령: /stop 중지, /quit 종료")
+    print("명령: /stop 중지, /forget 기록 삭제, /quit 종료")
     worker = asyncio.create_task(app.run())
     try:
         while True:
@@ -23,7 +23,7 @@ async def console(app):
                 await app.stop()
             elif command == "/forget":
                 await app.forget()
-                print("현재 버전에는 저장된 대화 기록이 없습니다.")
+                print("최근 대화 기록을 삭제했습니다.")
             elif not app.submit(
                 ChatInput(Viewer("console", "local"), text, str(uuid4()))
             ):

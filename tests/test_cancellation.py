@@ -70,6 +70,10 @@ def test_stop_discards_active_and_queued_responses_then_recovers(late_result):
             assert llm.cancelled.is_set()
             assert llm.calls == ["old", "new"]
             assert output == ["new"]
+            assert [m["content"] for m in app.history.messages(item("new").viewer)] == [
+                "new",
+                "new",
+            ]
             assert not worker.done()
             assert app._generation is None
         finally:
