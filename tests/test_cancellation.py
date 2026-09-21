@@ -1,6 +1,8 @@
 import asyncio
+import json
 from argparse import Namespace
 from contextlib import suppress
+from dataclasses import replace
 from pathlib import Path
 
 import httpx
@@ -8,7 +10,8 @@ import pytest
 
 from virtual_ai import app as app_module
 from virtual_ai.app import Application
-from virtual_ai.config import Settings, load_config
+from virtual_ai.config import AudioSettings, Settings, TTSSettings, load_config
+from virtual_ai.llm.base import LLMError
 from virtual_ai.llm.koboldcpp import KoboldCppClient
 from virtual_ai.schemas import ChatInput, Viewer
 
@@ -183,8 +186,131 @@ def test_http_cancellation_is_not_retried_or_wrapped():
                 await generation
             assert cleaned.is_set()
             assert len(calls) == 1
-            assert await client.generate([]) == "recovered"
+            with pytest.raises(LLMError, match="cleanup is unconfirmed"):
+                await client.generate([])
+            assert len(calls) == 1
         finally:
             await client.aclose()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("abort_success", [True, False])
+def test_stop_audio_is_immediate_and_shutdown_joins_server_cleanup(abort_success):
+    async def run():
+        started, aborting, release = (asyncio.Event() for _ in range(3))
+        aborts, output = [], []
+
+        async def handler(request):
+            if request.url.path == "/api/extra/abort":
+                aborts.append(json.loads(request.content)["genkey"])
+                aborting.set()
+                await release.wait()
+                return httpx.Response(
+                    200, json={"success": abort_success, "done": True}
+                )
+            if request.url.path == "/api/extra/perf":
+                return httpx.Response(200, json={"idle": 1, "queue": 0})
+            started.set()
+            await asyncio.Event().wait()
+
+        class Player:
+            stopped = False
+
+            async def stop(self):
+                self.stopped = True
+
+        settings, character = load_config(ROOT / "configs/app.example.yaml")
+        settings = replace(
+            settings,
+            server_abort_enabled=True,
+            audio=AudioSettings(enabled=True),
+            tts=TTSSettings(enabled=True, ref_audio_path="unused.wav"),
+        )
+        llm = KoboldCppClient(settings, httpx.MockTransport(handler))
+        player = Player()
+        app = Application(
+            settings, character, llm, output.append, tts=object(), player=player
+        )
+        app.submit(item("old"))
+        processing = asyncio.create_task(app.process_next())
+        await started.wait()
+        app.submit(item("queued"))
+        await app.stop()
+        assert player.stopped and not app.queue
+        await aborting.wait()
+        await app.stop()
+        closing = asyncio.create_task(app.shutdown())
+        await asyncio.sleep(0)
+        assert not closing.done()
+        assert len(aborts) == 1
+        release.set()
+        await asyncio.wait_for(closing, 1)
+        await processing
+        await llm.aclose()
+        assert output == []
+        assert app.history.messages(item("old").viewer) == []
+        assert app._generation is None
+
+    asyncio.run(run())
+
+
+def test_mock_with_server_abort_enabled_never_constructs_http_client(monkeypatch):
+    settings, character = load_config(ROOT / "configs/app.example.yaml")
+    settings = replace(settings, backend="mock", server_abort_enabled=True)
+    monkeypatch.setattr(app_module, "load_config", lambda _: (settings, character))
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("mock mode created a network client")
+
+    monkeypatch.setattr(httpx, "AsyncClient", unexpected)
+    asyncio.run(
+        app_module.run_cli(Namespace(config="unused", backend="mock", once="hello"))
+    )
+
+
+def test_console_quit_joins_koboldcpp_abort(monkeypatch):
+    async def run():
+        started, aborting, release = (asyncio.Event() for _ in range(3))
+        aborts = []
+
+        async def handler(request):
+            if request.url.path == "/api/extra/abort":
+                aborts.append(json.loads(request.content)["genkey"])
+                aborting.set()
+                await release.wait()
+                return httpx.Response(200, json={"success": "true", "done": "true"})
+            if request.url.path == "/api/extra/perf":
+                return httpx.Response(200, json={"idle": 1, "queue": 0})
+            started.set()
+            await asyncio.Event().wait()
+
+        settings, character = load_config(ROOT / "configs/app.example.yaml")
+        settings = replace(settings, backend="koboldcpp", server_abort_enabled=True)
+        llm = KoboldCppClient(settings, httpx.MockTransport(handler))
+        monkeypatch.setattr(app_module, "load_config", lambda _: (settings, character))
+        monkeypatch.setattr(app_module, "KoboldCppClient", lambda _: llm)
+        inputs = iter(["old", "/quit"])
+
+        async def controlled_input(function, *args):
+            command = next(inputs)
+            if command == "/quit":
+                await started.wait()
+            return command
+
+        monkeypatch.setattr(asyncio, "to_thread", controlled_input)
+        before = asyncio.all_tasks()
+        cli = asyncio.create_task(
+            app_module.run_cli(
+                Namespace(config="unused", backend="koboldcpp", once=None)
+            )
+        )
+        await aborting.wait()
+        assert not cli.done() and not llm._client.is_closed
+        release.set()
+        await asyncio.wait_for(cli, 1)
+        assert len(aborts) == 1
+        assert llm._client.is_closed and llm._control.is_closed
+        assert asyncio.all_tasks() == before
 
     asyncio.run(run())
