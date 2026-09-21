@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 import subprocess
 import sys
 from argparse import Namespace
@@ -20,9 +21,10 @@ from virtual_ai.schemas import ChatInput, Viewer
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def cli(*args, input=None):
+def cli(*args, input=None, env=None, utf8=True):
     return subprocess.run(
-        [sys.executable, "-X", "utf8", "-m", "virtual_ai", *args],
+        [sys.executable, *(["-X", "utf8"] if utf8 else []), "-m", "virtual_ai", *args],
+        env=env,
         input=input,
         capture_output=True,
         text=True,
@@ -44,13 +46,46 @@ def test_mock_cli_runs_without_network_or_gpu():
     assert "안녕하세요" not in result.stderr
 
 
-def test_invalid_config_has_clear_error_without_traceback(tmp_path):
+@pytest.mark.parametrize(
+    "args,input,expected,code",
+    [
+        (("--once", "hello"), None, "안녕하세요", 0),
+        ((), "/forget\n/quit\n", "최근 대화 기록을 삭제했습니다", 0),
+        (("--once", " "), None, "입력이 비었거나", 2),
+    ],
+)
+def test_cli_uses_utf8_with_legacy_windows_streams(args, input, expected, code):
+    env = {**os.environ, "PYTHONUTF8": "0", "PYTHONIOENCODING": "cp1252"}
+    result = cli("--backend", "mock", *args, input=input, env=env, utf8=False)
+    assert result.returncode == code
+    assert expected in result.stdout + result.stderr
+    assert "UnicodeEncodeError" not in result.stderr
+    assert "application_status=closed" in result.stderr
+
+
+@pytest.mark.parametrize("legacy_encoding", [False, True])
+def test_invalid_config_has_clear_error_without_traceback(tmp_path, legacy_encoding):
     config = tmp_path / "invalid.yaml"
     config.write_text("llm: [", encoding="utf-8")
-    result = cli("--config", str(config), "--once", "hello")
+    env = (
+        {**os.environ, "PYTHONUTF8": "0", "PYTHONIOENCODING": "cp1252"}
+        if legacy_encoding
+        else None
+    )
+    result = cli(
+        "--config", str(config), "--once", "hello", env=env, utf8=not legacy_encoding
+    )
     assert result.returncode == 2
+    assert "설정/실행 오류:" in result.stderr
     assert "invalid YAML" in result.stderr
     assert "Traceback" not in result.stderr
+    assert "UnicodeEncodeError" not in result.stderr
+
+
+def test_configure_console_output_accepts_replacement_streams(monkeypatch):
+    monkeypatch.setattr(sys, "stdout", object())
+    monkeypatch.setattr(sys, "stderr", Namespace(reconfigure=None))
+    app_module.configure_console_output()
 
 
 def test_quit_and_eof_exit_cleanly():

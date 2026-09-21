@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import logging
+import sys
 from pathlib import Path
 from time import monotonic
 from uuid import uuid4
@@ -149,7 +150,16 @@ async def run_cli(args):
             logger.info("application_status=closed")
 
 
+def configure_console_output() -> None:
+    """CLI의 표준 출력과 오류 출력을 UTF-8로 통일한다."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors="backslashreplace")
+
+
 def main():
+    configure_console_output()
     parser = argparse.ArgumentParser(description="Virtual AI text conversation")
     parser.add_argument("--config", default="configs/app.example.yaml")
     parser.add_argument("--backend", choices=("mock", "fake", "koboldcpp"))
