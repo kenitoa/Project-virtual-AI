@@ -24,6 +24,7 @@ from virtual_ai.llm.mock import FakeLLM
 from virtual_ai.memory.recent import RecentHistory
 from virtual_ai.prompting import build_messages, load_system_prompt
 from virtual_ai.safety import prepare_response
+from virtual_ai.subtitles import SubtitleError, SubtitleWriter
 from virtual_ai.tts.base import TTSClient, TTSError
 from virtual_ai.tts.gpt_sovits import GPTSoVITSClient
 
@@ -42,6 +43,7 @@ class Application:
         player: AudioPlayer | None = None,
         avatar: AvatarClient | None = None,
         expression_policy=None,
+        subtitles: SubtitleWriter | None = None,
         audio_directory=Path("generated_audio"),
     ):
         self.settings, self.character, self.llm = settings, character, llm
@@ -64,9 +66,26 @@ class Application:
         self._audio_stop_done.set()
         self.audio_directory = Path(audio_directory)
         self._closed = False
+        self.subtitles = subtitles if settings.subtitles.enabled else None
+        self._subtitle_response_id = None
         self._voice_enabled = settings.tts.enabled and settings.audio.enabled
         if self._voice_enabled and (tts is None or player is None):
             raise ValueError("enabled voice pipeline requires TTS and audio clients")
+        self._update_subtitle()
+
+    def _update_subtitle(self, response=None):
+        if self.subtitles is None:
+            return
+        self._subtitle_response_id = (
+            response.response_id if response is not None else None
+        )
+        try:
+            if response is None:
+                self.subtitles.clear()
+            else:
+                self.subtitles.write(response)
+        except SubtitleError:
+            logger.warning("subtitle_status=update_failed state=unknown")
 
     def submit(self, item):
         # All chat goes through this data-only entry point, even '/stop'.
@@ -85,6 +104,7 @@ class Application:
     async def stop(self):
         """Trusted local operator only; never dispatch this from model/chat text."""
         self._epoch += 1
+        subtitle_response_id = self._subtitle_response_id
         self.queue.clear()
         if self._mouth_session is not None:
             self._mouth_session.stop()
@@ -100,6 +120,9 @@ class Application:
             logger.warning("audio_status=stop_failed")
         finally:
             audio_stop_done.set()
+            # Audio abort precedes file I/O. An old stop must not erase a newer answer.
+            if self._subtitle_response_id == subtitle_response_id:
+                self._update_subtitle()
 
     async def shutdown(self):
         """Finish in-flight cleanup before the owner closes borrowed clients."""
@@ -171,6 +194,7 @@ class Application:
                 ),
             )
             self.output(response.final)
+            self._update_subtitle(response)
             if not response.blocked:
                 self.history.add(item.viewer, item.text, response.final)
             if self._voice_enabled and response.speech.strip():
@@ -370,7 +394,15 @@ async def run_cli(args):
             except (AvatarError, TimeoutError):
                 logger.warning("avatar_status=unknown recovery=manual")
         app = Application(
-            settings, character, llm, tts=tts, player=player, avatar=avatar
+            settings,
+            character,
+            llm,
+            tts=tts,
+            player=player,
+            avatar=avatar,
+            subtitles=SubtitleWriter(settings.subtitles)
+            if settings.subtitles.enabled
+            else None,
         )
         resources.push_async_callback(app.shutdown)
         if args.once is not None:

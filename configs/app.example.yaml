@@ -25,6 +25,9 @@ audio:
   enabled: false
   output_device: null  # null: 시스템 기본 출력; 장치 번호 또는 이름도 가능
 character_path: character.yaml
+subtitles:
+  enabled: false
+  path: ../.local/obs-subtitle.txt  # fixed UTF-8 file for OBS; relative to this config
 vts:
   enabled: false
   url: ws://127.0.0.1:8001

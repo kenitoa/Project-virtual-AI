@@ -10,6 +10,25 @@ import yaml
 
 
 @dataclass(frozen=True)
+class SubtitleSettings:
+    enabled: bool = False
+    path: str = "../.local/obs-subtitle.txt"
+
+    def __post_init__(self):
+        if type(self.enabled) is not bool:
+            raise ValueError("subtitles.enabled must be a boolean")
+        if (
+            not isinstance(self.path, str)
+            or not self.path.strip()
+            or Path(self.path).parent.name != ".local"
+            or Path(self.path).suffix != ".txt"
+        ):
+            raise ValueError(
+                "subtitles.path must be a text file directly inside .local"
+            )
+
+
+@dataclass(frozen=True)
 class VTSSettings:
     enabled: bool = False
     url: str = "ws://127.0.0.1:8001"
@@ -227,6 +246,7 @@ class Settings:
     tts: TTSSettings = field(default_factory=TTSSettings)
     audio: AudioSettings = field(default_factory=AudioSettings)
     vts: VTSSettings = field(default_factory=VTSSettings)
+    subtitles: SubtitleSettings = field(default_factory=SubtitleSettings)
 
     def __post_init__(self):
         bounds = {
@@ -276,6 +296,8 @@ class Settings:
             raise ValueError("audio must be AudioSettings")
         if not isinstance(self.vts, VTSSettings):
             raise ValueError("vts must be VTSSettings")
+        if not isinstance(self.subtitles, SubtitleSettings):
+            raise ValueError("subtitles must be SubtitleSettings")
         if not isinstance(self.model, str) or not self.model.strip():
             raise ValueError("model must not be empty")
         for name in ("blocked_terms", "allowed_expressions"):
@@ -307,6 +329,7 @@ def load_config(path: Path) -> tuple[Settings, dict]:
         "tts",
         "audio",
         "vts",
+        "subtitles",
     }:
         raise ValueError("invalid app configuration")
     groups = {
@@ -348,6 +371,16 @@ def load_config(path: Path) -> tuple[Settings, dict]:
     ):
         raise ValueError("invalid audio configuration")
     options["audio"] = AudioSettings(**audio)
+    subtitles = data.get("subtitles", {})
+    if not isinstance(subtitles, dict) or set(subtitles) - set(
+        SubtitleSettings.__dataclass_fields__
+    ):
+        raise ValueError("invalid subtitles configuration")
+    subtitle_settings = SubtitleSettings(**subtitles)
+    options["subtitles"] = SubtitleSettings(
+        enabled=subtitle_settings.enabled,
+        path=str((path.parent / subtitle_settings.path).resolve()),
+    )
     vts = data.get("vts", {})
     if not isinstance(vts, dict) or set(vts) - set(VTSSettings.__dataclass_fields__):
         raise ValueError("invalid vts configuration")
