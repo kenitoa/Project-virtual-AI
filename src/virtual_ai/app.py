@@ -4,7 +4,7 @@ import argparse
 import asyncio
 import logging
 import sys
-from contextlib import AsyncExitStack
+from contextlib import AsyncExitStack, suppress
 from dataclasses import replace
 from pathlib import Path
 from time import monotonic
@@ -17,6 +17,7 @@ from virtual_ai.expressions import select_expression
 from virtual_ai.inputs.queue import InputQueue
 from virtual_ai.integrations.vts.base import AvatarClient, AvatarError
 from virtual_ai.integrations.vts.client import VTSClient
+from virtual_ai.integrations.youtube import YouTubeChat, receive_chat
 from virtual_ai.lipsync import MouthSync
 from virtual_ai.llm.base import LLMClient, LLMError
 from virtual_ai.llm.koboldcpp import KoboldCppClient
@@ -412,7 +413,19 @@ async def run_cli(args):
                 raise ValueError("입력이 비었거나 길이 제한을 초과했습니다.")
             await app.process_next(raise_errors=True)
         else:
-            await console(app)
+            chat_task = None
+            if settings.youtube.enabled:
+                adapter = YouTubeChat(
+                    settings.youtube, max_age=settings.queue_ttl_seconds
+                )
+                chat_task = asyncio.create_task(receive_chat(adapter, app.submit))
+            try:
+                await console(app)
+            finally:
+                if chat_task is not None:
+                    chat_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await chat_task
 
 
 def configure_console_output() -> None:

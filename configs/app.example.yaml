@@ -1,4 +1,7 @@
 # character_path는 이 설정 파일의 폴더 기준입니다.
+youtube:
+  enabled: false  # enable only after manual OBS recording verification
+  live_chat_id: ""  # live chat ID, not a video ID; token in YOUTUBE_ACCESS_TOKEN
 llm:
   backend: fake  # mock/fake는 고정 응답, 실제 서버는 koboldcpp
   base_url: http://127.0.0.1:5001

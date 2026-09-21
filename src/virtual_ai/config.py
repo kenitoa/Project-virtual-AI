@@ -10,6 +10,20 @@ import yaml
 
 
 @dataclass(frozen=True)
+class YouTubeSettings:
+    enabled: bool = False
+    live_chat_id: str = ""
+
+    def __post_init__(self):
+        if type(self.enabled) is not bool:
+            raise ValueError("youtube.enabled must be a boolean")
+        if not isinstance(self.live_chat_id, str) or (
+            self.enabled and not self.live_chat_id.strip()
+        ):
+            raise ValueError("enabled youtube requires live_chat_id")
+
+
+@dataclass(frozen=True)
 class SubtitleSettings:
     enabled: bool = False
     path: str = "../.local/obs-subtitle.txt"
@@ -247,6 +261,7 @@ class Settings:
     audio: AudioSettings = field(default_factory=AudioSettings)
     vts: VTSSettings = field(default_factory=VTSSettings)
     subtitles: SubtitleSettings = field(default_factory=SubtitleSettings)
+    youtube: YouTubeSettings = field(default_factory=YouTubeSettings)
 
     def __post_init__(self):
         bounds = {
@@ -298,6 +313,8 @@ class Settings:
             raise ValueError("vts must be VTSSettings")
         if not isinstance(self.subtitles, SubtitleSettings):
             raise ValueError("subtitles must be SubtitleSettings")
+        if not isinstance(self.youtube, YouTubeSettings):
+            raise ValueError("youtube must be YouTubeSettings")
         if not isinstance(self.model, str) or not self.model.strip():
             raise ValueError("model must not be empty")
         for name in ("blocked_terms", "allowed_expressions"):
@@ -330,6 +347,7 @@ def load_config(path: Path) -> tuple[Settings, dict]:
         "audio",
         "vts",
         "subtitles",
+        "youtube",
     }:
         raise ValueError("invalid app configuration")
     groups = {
@@ -371,6 +389,12 @@ def load_config(path: Path) -> tuple[Settings, dict]:
     ):
         raise ValueError("invalid audio configuration")
     options["audio"] = AudioSettings(**audio)
+    youtube = data.get("youtube", {})
+    if not isinstance(youtube, dict) or set(youtube) - set(
+        YouTubeSettings.__dataclass_fields__
+    ):
+        raise ValueError("invalid youtube configuration")
+    options["youtube"] = YouTubeSettings(**youtube)
     subtitles = data.get("subtitles", {})
     if not isinstance(subtitles, dict) or set(subtitles) - set(
         SubtitleSettings.__dataclass_fields__
