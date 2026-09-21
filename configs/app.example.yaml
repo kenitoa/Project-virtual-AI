@@ -1,0 +1,22 @@
+# character_path는 이 설정 파일의 폴더 기준입니다.
+llm:
+  backend: fake  # 실제 서버 사용 시 koboldcpp
+  base_url: http://127.0.0.1:5001
+  model: Qwen3-8B
+  max_output_tokens: 256
+  timeout_seconds: 30
+  retries: 1  # 최초 시도 외 추가 시도; 최대 3
+character_path: character.yaml
+limits:
+  max_input_chars: 1000
+  history_turns: 6
+  history_chars: 6000
+  history_ttl_seconds: 3600
+  max_viewers: 100
+  queue_size: 20
+  queue_ttl_seconds: 30
+output:
+  max_output_chars: 600
+  max_sentences: 3
+  blocked_terms: []  # 금지 문구 설정; 의미 기반 검사를 대체하지 않음
+  allowed_expressions: [neutral, happy, sad]
