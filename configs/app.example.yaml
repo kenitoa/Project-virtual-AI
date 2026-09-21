@@ -25,6 +25,18 @@ audio:
   enabled: false
   output_device: null  # null: 시스템 기본 출력; 장치 번호 또는 이름도 가능
 character_path: character.yaml
+vts:
+  enabled: false
+  url: ws://127.0.0.1:8001
+  plugin_name: ProjectVirtualAI
+  plugin_developer: ProjectVirtualAITeam
+  token_path: ../.local/vts-token.json  # relative to this config; Git-ignored
+  request_timeout_seconds: 2
+  authentication_timeout_seconds: 60
+  expected_model_id: ""  # required for expression changes; obtain with --list-hotkeys
+  expression_hotkeys:
+    happy: ""  # operator-selected ToggleExpression hotkey IDs
+    sad: ""
 limits:
   max_input_chars: 1000
   history_turns: 6

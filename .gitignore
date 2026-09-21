@@ -15,6 +15,7 @@ dist/
 configs/app.yaml
 secrets/
 tokens/
+.local/
 models/
 backends/
 external/

@@ -3,9 +3,92 @@
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import MappingProxyType
 from urllib.parse import urlsplit
 
 import yaml
+
+
+@dataclass(frozen=True)
+class VTSSettings:
+    enabled: bool = False
+    url: str = "ws://127.0.0.1:8001"
+    plugin_name: str = "ProjectVirtualAI"
+    plugin_developer: str = "ProjectVirtualAITeam"
+    token_path: str = "../.local/vts-token.json"
+    request_timeout_seconds: float = 2
+    authentication_timeout_seconds: float = 60
+    expected_model_id: str = ""
+    expression_hotkeys: dict = field(default_factory=lambda: {"happy": "", "sad": ""})
+
+    def __post_init__(self):
+        if type(self.enabled) is not bool:
+            raise ValueError("vts.enabled must be a boolean")
+        if not isinstance(self.url, str):
+            raise ValueError("vts.url must be a local WebSocket URL")
+        url = urlsplit(self.url)
+        if (
+            url.scheme != "ws"
+            or url.hostname not in ("127.0.0.1", "::1", "localhost")
+            or url.username is not None
+            or url.password is not None
+            or url.path not in ("", "/")
+            or url.query
+            or url.fragment
+            or (url.port is not None and not 1 <= url.port <= 65535)
+        ):
+            raise ValueError("vts.url must be a loopback ws:// URL without credentials")
+        for name in ("plugin_name", "plugin_developer"):
+            value = getattr(self, name)
+            if (
+                not isinstance(value, str)
+                or not 3 <= len(value) <= 32
+                or not value.strip()
+                or not value.isprintable()
+            ):
+                raise ValueError(f"vts.{name} must contain 3 to 32 characters")
+        for name, upper in (
+            ("request_timeout_seconds", 30),
+            ("authentication_timeout_seconds", 300),
+        ):
+            value = getattr(self, name)
+            if (
+                type(value) not in (int, float)
+                or not math.isfinite(value)
+                or not 0 < value <= upper
+            ):
+                raise ValueError(f"vts.{name} must be positive and at most {upper}")
+        if (
+            not isinstance(self.token_path, str)
+            or not self.token_path.strip()
+            or Path(self.token_path).parent.name != ".local"
+            or Path(self.token_path).suffix != ".json"
+        ):
+            raise ValueError(
+                "vts.token_path must be a JSON file directly inside .local"
+            )
+        if (
+            not isinstance(self.expected_model_id, str)
+            or len(self.expected_model_id) > 128
+        ):
+            raise ValueError(
+                "vts.expected_model_id must be a string of at most 128 characters"
+            )
+        mapping = self.expression_hotkeys
+        if not isinstance(mapping, (dict, MappingProxyType)) or set(mapping) - {
+            "happy",
+            "sad",
+        }:
+            raise ValueError("vts.expression_hotkeys permits only happy and sad")
+        if any(
+            not isinstance(v, str) or len(v) > 128 or (v and not v.strip())
+            for v in mapping.values()
+        ):
+            raise ValueError("vts hotkey IDs must be strings of at most 128 characters")
+        ids = [v for v in mapping.values() if v]
+        if len(ids) != len(set(ids)):
+            raise ValueError("vts hotkey IDs must be distinct")
+        object.__setattr__(self, "expression_hotkeys", MappingProxyType(dict(mapping)))
 
 
 @dataclass(frozen=True)
@@ -116,6 +199,7 @@ class Settings:
     allowed_expressions: tuple[str, ...] = ("neutral", "happy", "sad")
     tts: TTSSettings = field(default_factory=TTSSettings)
     audio: AudioSettings = field(default_factory=AudioSettings)
+    vts: VTSSettings = field(default_factory=VTSSettings)
 
     def __post_init__(self):
         bounds = {
@@ -163,6 +247,8 @@ class Settings:
             raise ValueError("tts must be TTSSettings")
         if not isinstance(self.audio, AudioSettings):
             raise ValueError("audio must be AudioSettings")
+        if not isinstance(self.vts, VTSSettings):
+            raise ValueError("vts must be VTSSettings")
         if not isinstance(self.model, str) or not self.model.strip():
             raise ValueError("model must not be empty")
         for name in ("blocked_terms", "allowed_expressions"):
@@ -193,6 +279,7 @@ def load_config(path: Path) -> tuple[Settings, dict]:
         "system_prompt_path",
         "tts",
         "audio",
+        "vts",
     }:
         raise ValueError("invalid app configuration")
     groups = {
@@ -234,6 +321,13 @@ def load_config(path: Path) -> tuple[Settings, dict]:
     ):
         raise ValueError("invalid audio configuration")
     options["audio"] = AudioSettings(**audio)
+    vts = data.get("vts", {})
+    if not isinstance(vts, dict) or set(vts) - set(VTSSettings.__dataclass_fields__):
+        raise ValueError("invalid vts configuration")
+    vts_settings = VTSSettings(**vts)
+    options["vts"] = VTSSettings(
+        **{**vts, "token_path": str((path.parent / vts_settings.token_path).resolve())}
+    )
     for group, allowed in groups.items():
         values = data.get(group, {})
         if not isinstance(values, dict) or set(values) - allowed:
