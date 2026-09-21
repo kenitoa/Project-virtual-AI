@@ -4,10 +4,13 @@ import argparse
 import asyncio
 import logging
 import sys
+from contextlib import AsyncExitStack
 from pathlib import Path
 from time import monotonic
 from uuid import uuid4
 
+from virtual_ai.audio.base import AudioError, AudioPlayer
+from virtual_ai.audio.player import WAVPlayer
 from virtual_ai.config import load_config
 from virtual_ai.inputs.queue import InputQueue
 from virtual_ai.llm.base import LLMClient, LLMError
@@ -16,12 +19,24 @@ from virtual_ai.llm.mock import FakeLLM
 from virtual_ai.memory.recent import RecentHistory
 from virtual_ai.prompting import build_messages, load_system_prompt
 from virtual_ai.safety import prepare_response
+from virtual_ai.tts.base import TTSClient, TTSError
+from virtual_ai.tts.gpt_sovits import GPTSoVITSClient
 
 logger = logging.getLogger(__name__)
 
 
 class Application:
-    def __init__(self, settings, character, llm: LLMClient, output=print):
+    def __init__(
+        self,
+        settings,
+        character,
+        llm: LLMClient,
+        output=print,
+        *,
+        tts: TTSClient | None = None,
+        player: AudioPlayer | None = None,
+        audio_directory=Path("generated_audio"),
+    ):
         self.settings, self.character, self.llm = settings, character, llm
         self.output = output
         self.system_prompt = load_system_prompt(settings.system_prompt_path)
@@ -31,11 +46,19 @@ class Application:
         self._lock = asyncio.Lock()
         self._epoch = 0
         self._generation: asyncio.Task[str] | None = None
+        self._voice: asyncio.Task | None = None
+        self.tts, self.player = tts, player
+        self.audio_directory = Path(audio_directory)
+        self._closed = False
+        self._voice_enabled = settings.tts.enabled and settings.audio.enabled
+        if self._voice_enabled and (tts is None or player is None):
+            raise ValueError("enabled voice pipeline requires TTS and audio clients")
 
     def submit(self, item):
         # All chat goes through this data-only entry point, even '/stop'.
         if (
-            not item.text.strip()
+            self._closed
+            or not item.text.strip()
             or len(item.text) > self.settings.max_input_chars
             or not item.message_id
         ):
@@ -51,6 +74,21 @@ class Application:
         self.queue.clear()
         if self._generation is not None and not self._generation.done():
             self._generation.cancel()
+        if self._voice is not None and not self._voice.done():
+            self._voice.cancel()
+        if self._voice_enabled:
+            try:
+                await self.player.stop()
+            except AudioError:
+                logger.warning("audio_status=stop_failed")
+
+    async def shutdown(self):
+        """Finish in-flight cleanup before the owner closes borrowed clients."""
+        self._closed = True
+        self._ready.set()
+        await self.stop()
+        async with self._lock:
+            pass
 
     async def forget(self, viewer=None):
         await self.stop()
@@ -58,6 +96,8 @@ class Application:
 
     async def process_next(self, *, raise_errors=False):
         async with self._lock:
+            if self._closed:
+                return None
             queued = self.queue.pop_timed()
             if queued is None:
                 return None
@@ -108,13 +148,71 @@ class Application:
             self.output(response.final)
             if not response.blocked:
                 self.history.add(item.viewer, item.text, response.final)
+            if self._voice_enabled and response.speech.strip():
+                self._voice = asyncio.create_task(self._speak(response, epoch))
+                try:
+                    await self._voice
+                    if asyncio.current_task().cancelling():
+                        raise asyncio.CancelledError
+                except asyncio.CancelledError:
+                    if asyncio.current_task().cancelling() or epoch == self._epoch:
+                        raise
+                    # Text already displayed and recorded remains valid.
+                finally:
+                    self._voice = None
             return response
 
+    async def _speak(self, response, epoch):
+        # IDs come from uuid4 above, never model output or incoming message IDs.
+        destination = self.audio_directory / f"{response.response_id}.wav"
+
+        def cancelled():
+            return (
+                self._closed
+                or epoch != self._epoch
+                or asyncio.current_task().cancelling()
+            )
+
+        try:
+            if cancelled():
+                return
+            started = monotonic()
+            try:
+                await self.tts.synthesize(response.speech, destination)
+            finally:
+                logger.info(
+                    "response_id=%s tts_seconds=%.6f",
+                    response.response_id,
+                    monotonic() - started,
+                )
+            if cancelled():
+                return
+            started = monotonic()
+            try:
+                await self.player.play(destination)
+            finally:
+                logger.info(
+                    "response_id=%s playback_seconds=%.6f",
+                    response.response_id,
+                    monotonic() - started,
+                )
+        except (TTSError, AudioError):
+            logger.warning("response_id=%s voice_status=failed", response.response_id)
+            if not cancelled():
+                self.output("음성 출력을 건너뜁니다. 텍스트 답변은 유지됩니다.")
+        finally:
+            try:
+                destination.unlink(missing_ok=True)
+            except OSError:
+                logger.warning(
+                    "response_id=%s audio_cleanup=failed", response.response_id
+                )
+
     async def run(self):
-        while True:
+        while not self._closed:
             await self._ready.wait()
             self._ready.clear()
-            while len(self.queue):
+            while len(self.queue) and not self._closed:
                 await self.process_next()
 
 
@@ -130,9 +228,17 @@ async def run_cli(args):
     llm = (
         FakeLLM() if settings.backend in ("mock", "fake") else KoboldCppClient(settings)
     )
-    app = None
-    try:
-        app = Application(settings, character, llm)
+    async with AsyncExitStack() as resources:
+        resources.callback(logger.info, "application_status=closed")
+        resources.push_async_callback(llm.aclose)
+        tts = player = None
+        if settings.tts.enabled and settings.audio.enabled:
+            tts = GPTSoVITSClient(settings.tts)
+            resources.push_async_callback(tts.aclose)
+            player = WAVPlayer(settings.audio)
+            resources.push_async_callback(player.aclose)
+        app = Application(settings, character, llm, tts=tts, player=player)
+        resources.push_async_callback(app.shutdown)
         if args.once is not None:
             if not app.submit(
                 ChatInput(Viewer("console", "local"), args.once, str(uuid4()))
@@ -141,13 +247,6 @@ async def run_cli(args):
             await app.process_next(raise_errors=True)
         else:
             await console(app)
-    finally:
-        try:
-            if app is not None:
-                await app.stop()
-        finally:
-            await llm.aclose()
-            logger.info("application_status=closed")
 
 
 def configure_console_output() -> None:
@@ -176,6 +275,8 @@ def main():
         asyncio.run(run_cli(args))
     except LLMError as exc:
         parser.exit(1, f"LLM 오류: {exc}\n")
+    except (AudioError, TTSError):
+        parser.exit(1, "음성 클라이언트 정리 중 오류가 발생했습니다.\n")
     except (ValueError, OSError) as exc:
         parser.exit(2, f"설정/실행 오류: {exc}\n")
     except KeyboardInterrupt:

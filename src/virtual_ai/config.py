@@ -1,11 +1,93 @@
 """Load trusted local YAML configuration; reject invalid limits."""
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import yaml
+
+
+@dataclass(frozen=True)
+class AudioSettings:
+    enabled: bool = False
+    output_device: int | str | None = None
+
+    def __post_init__(self):
+        if type(self.enabled) is not bool:
+            raise ValueError("audio.enabled must be a boolean")
+        device = self.output_device
+        if device is not None and not (
+            (type(device) is int and device >= 0)
+            or (isinstance(device, str) and 0 < len(device.strip()) <= 256)
+        ):
+            raise ValueError("audio.output_device must be null, an index or a name")
+
+
+@dataclass(frozen=True)
+class TTSSettings:
+    enabled: bool = False
+    base_url: str = "http://127.0.0.1:9880"
+    ref_audio_path: str = ""
+    prompt_text: str = ""
+    prompt_lang: str = "ko"
+    text_lang: str = "ko"
+    timeout_seconds: float = 60
+    total_timeout_seconds: float = 120
+    max_text_chars: int = 1000
+    max_response_bytes: int = 20 * 1024 * 1024
+
+    def __post_init__(self):
+        if type(self.enabled) is not bool:
+            raise ValueError("tts.enabled must be a boolean")
+        _validate_base_url(self.base_url)
+        for name in ("ref_audio_path", "prompt_text", "prompt_lang", "text_lang"):
+            value = getattr(self, name)
+            if not isinstance(value, str) or len(value) > 4000:
+                raise ValueError(
+                    f"tts.{name} must be a string of at most 4000 characters"
+                )
+        if self.enabled and not self.ref_audio_path.strip():
+            raise ValueError("tts.ref_audio_path is required when enabled")
+        if not self.prompt_lang.strip() or not self.text_lang.strip():
+            raise ValueError("tts languages must not be empty")
+        for name in ("timeout_seconds", "total_timeout_seconds"):
+            value = getattr(self, name)
+            if (
+                type(value) not in (int, float)
+                or not math.isfinite(value)
+                or not 0 < value <= 86400
+            ):
+                raise ValueError(f"tts.{name} must be positive and at most 86400")
+        for name, limit in (
+            ("max_text_chars", 4000),
+            ("max_response_bytes", 100 * 1024 * 1024),
+        ):
+            value = getattr(self, name)
+            if type(value) is not int or not 1 <= value <= limit:
+                raise ValueError(f"tts.{name} must be an integer in [1, {limit}]")
+
+
+def _validate_base_url(value):
+    if not isinstance(value, str):
+        raise ValueError("base_url must be a URL")
+    url = urlsplit(value)
+    if (
+        url.scheme not in ("http", "https")
+        or not url.hostname
+        or url.username
+        or url.password
+        or url.query
+        or url.fragment
+        or url.path not in ("", "/")
+    ):
+        raise ValueError(
+            "base_url must be an HTTP(S) server URL without path, credentials or query"
+        )
+    try:
+        url.port
+    except ValueError:
+        raise ValueError("base_url has an invalid port") from None
 
 
 @dataclass(frozen=True)
@@ -30,6 +112,8 @@ class Settings:
     queue_ttl_seconds: float = 30
     blocked_terms: tuple[str, ...] = ()
     allowed_expressions: tuple[str, ...] = ("neutral", "happy", "sad")
+    tts: TTSSettings = field(default_factory=TTSSettings)
+    audio: AudioSettings = field(default_factory=AudioSettings)
 
     def __post_init__(self):
         bounds = {
@@ -67,25 +151,11 @@ class Settings:
             raise ValueError("context_tokens must exceed max_output_tokens")
         if not isinstance(self.system_prompt_path, str) or not self.system_prompt_path:
             raise ValueError("system_prompt_path must be a nonempty path")
-        if not isinstance(self.base_url, str):
-            raise ValueError("base_url must be a URL")
-        url = urlsplit(self.base_url)
-        if (
-            url.scheme not in ("http", "https")
-            or not url.hostname
-            or url.username
-            or url.password
-            or url.query
-            or url.fragment
-            or url.path not in ("", "/")
-        ):
-            raise ValueError(
-                "base_url must be an HTTP(S) server URL without path, credentials or query"
-            )
-        try:
-            url.port
-        except ValueError:
-            raise ValueError("base_url has an invalid port") from None
+        _validate_base_url(self.base_url)
+        if not isinstance(self.tts, TTSSettings):
+            raise ValueError("tts must be TTSSettings")
+        if not isinstance(self.audio, AudioSettings):
+            raise ValueError("audio must be AudioSettings")
         if not isinstance(self.model, str) or not self.model.strip():
             raise ValueError("model must not be empty")
         for name in ("blocked_terms", "allowed_expressions"):
@@ -114,6 +184,8 @@ def load_config(path: Path) -> tuple[Settings, dict]:
         "output",
         "character_path",
         "system_prompt_path",
+        "tts",
+        "audio",
     }:
         raise ValueError("invalid app configuration")
     groups = {
@@ -143,7 +215,16 @@ def load_config(path: Path) -> tuple[Settings, dict]:
             "allowed_expressions",
         },
     }
-    options = {}
+    tts = data.get("tts", {})
+    if not isinstance(tts, dict) or set(tts) - set(TTSSettings.__dataclass_fields__):
+        raise ValueError("invalid tts configuration")
+    options = {"tts": TTSSettings(**tts)}
+    audio = data.get("audio", {})
+    if not isinstance(audio, dict) or set(audio) - set(
+        AudioSettings.__dataclass_fields__
+    ):
+        raise ValueError("invalid audio configuration")
+    options["audio"] = AudioSettings(**audio)
     for group, allowed in groups.items():
         values = data.get(group, {})
         if not isinstance(values, dict) or set(values) - allowed:

@@ -34,3 +34,55 @@ epoch가 달라진 늦은 결과는 출력·기록하지 않습니다. Python �
 
 모든 설계 항목의 반영·후속·미검증 상태는 [skill 적용 현황](skill-coverage.md),
 실제 외부 엔진 검증은 [백엔드 기록](backends.md)을 참고하세요.
+
+## 독립 TTS WAV 검사
+
+`python -m virtual_ai.tts` → 고정 한국어 문장 → `TTSClient.synthesize(text, destination)`
+→ `GPTSoVITSClient` → WAV 검증 → 임시 파일 → 지정 파일 교체 순서입니다.
+`TTSSettings`는 기존 설정의 `tts` 절로 분리하며 기본 비활성화입니다.
+참조 음성 경로는 서버 파일시스템 기준으로 그대로 전달하고 출력 경로는 운영자 CLI가 정합니다.
+클라이언트당 동시에 한 요청만 보내고 자동 재시도는 하지 않습니다.
+전체 시간 제한은 잠금 대기와 HTTP 수신을 포함합니다. 취소는 전파하며 늦은 응답을 저장하지 않습니다.
+저장은 검증 뒤 동기적으로 완료하므로 파일 교체 완료 이후의 취소가 이미 저장된 파일을 삭제하지는 않습니다.
+서버 GPU 추론 중단은 보장하지 않습니다. 대화 흐름 연결은 아래 음성 파이프라인을 사용합니다.
+
+## 독립 WAV 재생
+
+`python -m virtual_ai.audio` → 저장된 PCM WAV → `AudioPlayer.play(path)` →
+`sounddevice.RawOutputStream` 순서입니다. `AudioSettings`의 `audio` 절은 기본 비활성화이고
+출력 장치 번호·이름 또는 시스템 기본 출력을 선택합니다. LLM/TTS는 호출하지 않습니다.
+
+`WAVPlayer`는 클라이언트당 재생 한 건만 허용하며 중복 재생을 대기열에 쌓지 않습니다.
+파일 읽기·검증과 장치의 열기/시작/중지/해제는 작업 스레드 한 곳에서 수행합니다.
+PortAudio 콜백은 미리 읽은 PCM을 출력하고 정상 EOF는 `CallbackStop`으로 알립니다.
+`finished_callback`으로 버퍼 소진을 기다린 뒤 `stop()`·`close()`합니다.
+
+긴급 `stop()`, Task 취소, `aclose()`는 중지 신호를 설정합니다. 콜백은 새 PCM 출력을
+차단하고 작업 스레드는 `abort()`·`close()`합니다. 비동기 메서드는 장치 해제가 끝나기
+전에는 반환하지 않으며, 장치 준비 중 취소되면 뒤늦은 재생 시작을 차단합니다.
+정상 완료는 `True`, 운영자 중지는 `False`, Task 취소는 `CancelledError`,
+파일·장치·콜백·해제 오류는 `AudioError`입니다. 종료된 재생기는 재사용하지 않습니다.
+
+독립 대화형 CLI는 재생 Task와 명령 수신을 함께 기다리므로 `/stop`을 처리할 수 있습니다.
+CI는 주입한 가짜 출력 스트림으로 검증합니다. 실제 장치·청취 결과는
+[오디오 검증 기록](audio.md)에 분리합니다.
+
+## 대화 음성 파이프라인
+
+두 활성화 설정(`tts.enabled`, `audio.enabled`)이 모두 참이면 `run_cli()`가 TTS와 재생기를
+생성해 `Application`에 주입합니다. 아니면 해당 클라이언트도 생성하지 않습니다.
+기존 `process_next()` 잠금은 LLM 생성부터 재생 종료·임시 파일 삭제까지 유지합니다.
+최종 답변 표시와 최근 기록 저장은 합성 전에 완료하며, `Response.raw` 대신 정리된
+`Response.speech`만 TTS로 전달합니다. 비어 있는 speech는 건너뜁니다.
+
+LLM 작업과 음성 작업은 각각 `_generation`, `_voice`로 추적합니다.
+`stop()`은 epoch 증가·대기열 제거 후 두 작업을 취소하고 `AudioPlayer.stop()`을 기다립니다.
+합성이 취소를 무시하고 돌아와도 epoch·작업 취소 상태를 확인해 재생하지 않습니다.
+파일명은 프로그램의 UUID 응답 ID이며 TTS 반환 경로나 모델 문자열을 파일명으로 사용하지 않습니다.
+음성 작업의 `finally`에서 자신에게 배정된 WAV만 삭제합니다.
+
+`shutdown()`은 새 입력을 거절하고 진행 중 작업과 파일 정리가 끝나기를 기다립니다.
+Application은 주입받은 클라이언트를 빌려 쓰며, CLI의 `AsyncExitStack`이 shutdown 이후
+재생기·TTS·LLM을 차례로 닫습니다. 한 클라이언트의 종료가 실패해도 나머지 정리를 시도합니다.
+음성 오류는 텍스트 답변을 취소하지 않고 다음 입력으로 이어집니다.
+실제 서버와 장치 확인은 [음성 연결 기록](voice-pipeline.md)에 분리합니다.
