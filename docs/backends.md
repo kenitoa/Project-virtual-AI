@@ -158,11 +158,14 @@ tts:
 5. 이 저장소에서 실행합니다. 기본 고정 문장을 합성하며 LLM 요청은 발생하지 않습니다.
 
 ```powershell
-python -m uv run --locked python -m virtual_ai.tts --config configs/app.yaml --output generated_audio/tts-test.wav
+python -m uv sync --locked
+python -m uv run --locked python -m virtual_ai.tts --config configs/app.yaml --output generated_audio/tts-real-01.wav
 $LASTEXITCODE
 ```
 
-종료 코드 0과 WAV 존재를 확인합니다. 클라이언트는 WAV Content-Type, RIFF 길이·청크,
+매번 새 출력 파일명을 사용하고 종료 코드 0과 이번 실행의 WAV 생성을 확인합니다.
+실패하면 기존 파일을 보존하므로 파일 존재만으로 성공을 판정하지 않습니다.
+클라이언트는 WAV Content-Type, RIFF 길이·청크,
 PCM 형식, 채널 수(1 또는 2), 양수 샘플레이트·프레임 수 및 실제 프레임 길이를 검사합니다.
 오류 JSON, 스트리밍용 미완성 헤더, 잘린 파일, 비어 있는 오디오 데이터는 저장하지 않습니다.
 음질·발음·무음 여부는 이 구조 검사로 판정할 수 없습니다.
@@ -183,11 +186,58 @@ GPU 추론 중단과 이후 재생 큐 취소는 별도 검증 대상이며 이�
   취소·늦은 응답·클라이언트 정리 검사 통과.
 - 테스트 HTTP 서버가 만든 PCM WAV를 실제 CLI로 받아 저장하는 검사 통과.
   이는 HTTP/파일 경로 검사이며 GPT-SoVITS 음성 모델 합성 성공을 뜻하지 않습니다.
-- 실제 GPT-SoVITS: 기본 포트 9880에 리스너 없음. 사용할 서버 버전·음성 모델·
-  권한 있는 참조 음성이 지정되지 않아 **실제 고정 문장 합성과 음질은 미검증**입니다.
-- 실제 검증 시 서버 커밋/버전, GPT·SoVITS 모델 파일과 버전, 참조 음성 사용 권한 확인,
-  설정 언어, 장치, 응답 시간, WAV 채널·샘플레이트·프레임 수, 종료 코드를 추가 기록합니다.
-  참조 음성 원본·전사문·생성 오디오·개인 경로는 커밋하지 않습니다.
+- 2026-09-21 재검증: 프로젝트 Python 3.14.7에서 `uv sync --locked` 및
+  TTS 테스트 36개 통과. 실제 서버 합성 결과는 아래와 같습니다.
+
+### 실제 GPT-SoVITS 검증 (2026-09-21)
+
+| 항목 | 검증 구성·결과 |
+| --- | --- |
+| 서버 | 공식 RVC-Boss/GPT-SoVITS, 커밋 `48b1a0169a28582a8984402f82cf438d3bfa6aca`, `api_v2.py` |
+| 모델 출처 | 공식 안내의 `lj1995/GPT-SoVITS`, revision `336b2ec4e8d4ac74740798dd40af44e74659ecaf` |
+| GPT 모델 | v2, `gsv-v2final-pretrained/s1bert25hz-5kh-longer-epoch=12-step=369668.ckpt` |
+| SoVITS 모델 | v2, `gsv-v2final-pretrained/s2G2333k.pth` |
+| 보조 모델 | 같은 revision의 `chinese-roberta-wwm-ext-large`, `chinese-hubert-base` |
+| 엔진 환경 | 프로젝트와 분리한 Python 3.10.21, PyTorch/Torchaudio 2.5.1+cu124, Transformers 4.51.3 |
+| 장치 | RTX 4050 Laptop, VRAM 6141 MiB, `device: cuda`, `is_half: true`; KoboldCpp 종료 후 TTS 단독 실행 |
+| 참조 음성 | KSS, Bingsu/KSS_Dataset의 default/train 행 0, 데이터 revision `48fdfd7ab1dbc1a62e4e8a8b9f4c360259d51d3c`; 44.1kHz 스테레오, 약 3.53초 |
+| 사용 조건 | 배포 문서의 CC BY-NC-SA 4.0 및 비상업적 사용 조건 확인. 이번 로컬 테스트에 한정하며 방송용 사용 허락을 뜻하지 않음 |
+| 클라이언트 | `prompt_lang: ko`, `text_lang: ko`, 단계별 60초 / 전체 120초; 참조 녹음에 대응하는 배포 전사문 사용 |
+| 합성 문장 | 기존 CLI의 고정 한국어 테스트 문장, LLM 호출 없음 |
+| 재생 | Windows `winsound.PlaySound`로 첫 성공 파일 2건의 재생 호출 정상 종료. 사람의 청취·발음·잘림·잡음 판정은 확인 대기 |
+
+시간은 CLI의 `tts_seconds`이며 요청·WAV 검사·저장·연결 종료를 포함합니다.
+서버 시작 및 가중치 로딩 시간은 제외합니다. 각 성공 요청은 새 파일명으로 저장했습니다.
+
+| 실행 | 종료 코드 | tts_seconds | WAV 결과 |
+| --- | --- | --- | --- |
+| 설치 직후 최초 요청 | 1 | 54.519631 | HTTP 400, 파일 없음; 한국어 전처리의 `pkg_resources` 누락 |
+| 의존성 보완 후 같은 서버 첫 성공 | 0 | 6.749671 | 32kHz, 모노, PCM 16-bit, 102400프레임 / 3.20초 |
+| 후속 요청 | 0 | 3.763185 | 같은 형식, 119040프레임 / 3.72초 |
+| 서버 중지 후 요청 | 1 | 2.096373 | 연결 실패 안내, 새 파일 없음 |
+| 서버 재시작 후 첫 요청 | 0 | 16.272584 | 같은 형식, 125440프레임 / 3.92초 |
+| 재시작 후 후속 요청 | 0 | 3.425561 | 같은 형식, 115200프레임 / 3.60초 |
+
+첫 성공 파일 두 건의 정규화 RMS는 각각 약 0.125 / 0.134로 완전 무음은 아닙니다.
+신호 크기나 재생 API 성공만으로 한국어 발음·잡음·잘림이 정상이라고 판정하지 않습니다.
+**실제 WAV 저장과 서버 재시작 복구는 확인했으며, 청취 확인 전까지 PR은 Draft를 유지합니다.**
+이 절은 TTS 단독 검증입니다. 후속 LLM/TTS 동시 로딩과 순차 합성·재생 관측은
+[음성 파이프라인 기록](voice-pipeline.md)에 구분했습니다.
+
+설치 시 서버 코드 수정 없이 누락된 `matplotlib`, `python-multipart`,
+`setuptools==80.10.2`를 엔진 환경에 추가했습니다. Windows 콘솔은
+`PYTHONUTF8=1`, `PYTHONIOENCODING=utf-8`로 실행하고 FFmpeg를 엔진 PATH에 배치했습니다.
+엔진의 `uv pip check`는 통과했으며 패키지 목록·모델 SHA-256·실행 로그는 로컬에 보관합니다.
+프로젝트의 `pyproject.toml`과 `uv.lock`에는 엔진 의존성을 추가하지 않았습니다.
+서버 설정은 위의 `custom` v2 구성이고, 프로젝트 설정에는 참조 경로·전사문·언어만
+전달합니다. 재시작에는 동일한 `api_v2.py` 실행 명령을 사용합니다.
+
+출처: [공식 GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS/tree/48b1a0169a28582a8984402f82cf438d3bfa6aca),
+[모델 revision](https://huggingface.co/lj1995/GPT-SoVITS/tree/336b2ec4e8d4ac74740798dd40af44e74659ecaf),
+[KSS 원 배포처](https://www.kaggle.com/datasets/bryanpark/korean-single-speaker-speech-dataset),
+[전사문·사용 조건을 포함한 KSS 배포 문서](https://huggingface.co/datasets/Bingsu/KSS_Dataset/blob/48fdfd7ab1dbc1a62e4e8a8b9f4c360259d51d3c/README.md).
+KSS 출처 표기: Kyubyong Park, KSS Dataset: Korean Single speaker Speech Dataset, 2018.
+참조 음성·전사문·생성 WAV·개인 경로는 커밋하지 않습니다.
 
 ## 참고
 

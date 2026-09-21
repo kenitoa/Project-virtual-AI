@@ -80,10 +80,44 @@ python -m uv run --locked python -m virtual_ai.tts --config configs/app.yaml --o
 고정 문장 “안녕하세요. 음성 합성 테스트입니다.”를 비스트리밍 WAV로 저장합니다.
 성공 시 종료 코드 0, TTS 실패 1, 설정 오류 2, 키보드 취소 130입니다.
 같은 출력 경로의 파일은 정상 WAV 검증이 끝난 경우에만 교체합니다.
-기본값은 비활성화이며 텍스트 대화 명령에서 TTS를 자동 호출하지 않습니다.
-재생·OBS·LLM `Response.speech` 연결은 후속 범위입니다.
+기본값은 비활성화입니다. 대화 명령의 음성 연결은 아래 두 활성화 설정이 모두 필요합니다.
+저장된 WAV의 독립 재생은 아래 명령을 사용합니다. OBS 연결은 후속 범위입니다.
 실제 음성 합성 검증은 서버·모델·참조 음성 준비 후 진행하며,
 요청 필드와 검증 절차는 [백엔드 문서](docs/backends.md#GPT-SoVITS-WAV-클라이언트)를 따릅니다.
+
+## 저장된 WAV 재생·중지
+
+`configs/app.yaml`에 `audio.enabled: true`, `audio.output_device: null`을 설정합니다.
+`null`은 시스템 기본 출력이며 장치 번호 또는 이름도 지정할 수 있습니다.
+
+```powershell
+python -m uv sync --locked
+python -m uv run --locked python -m virtual_ai.audio --list-devices
+python -m uv run --locked python -m virtual_ai.audio generated_audio/tts-real-01.wav --config configs/app.yaml --device 3
+python -m uv run --locked python -m virtual_ai.audio generated_audio/tts-real-01.wav --config configs/app.yaml --device 3 --interactive
+```
+
+장치 번호는 자신의 목록에서 선택합니다. 기본 명령은 재생 완료 후 종료합니다.
+`--interactive`는 재생 중에도 `/stop`, `/play 파일경로`, `/quit`을 받습니다.
+`/stop`과 Ctrl+C는 남은 장치 버퍼를 버리고 출력을 중단한 뒤 장치를 닫습니다.
+LLM·TTS 서버는 호출하지 않으며 기존 텍스트 콘솔의 `/stop`과는 별도 CLI입니다.
+지원 WAV·종료 코드·실제 스피커 검증 절차는 [오디오 문서](docs/audio.md)를 참고하세요.
+
+## LLM 답변의 음성 출력
+
+준비된 로컬 설정에서 `tts.enabled: true`와 `audio.enabled: true`를 모두 지정하면
+기존 대화 명령이 텍스트 표시 후 `Response.speech`를 합성하고 재생합니다.
+
+```powershell
+python -m uv run --locked python -m virtual_ai --config configs/app.yaml
+```
+
+둘 중 하나가 비활성화면 텍스트 대화만 수행합니다. LLM 생성부터 재생 종료까지 한 응답씩
+처리합니다. `/stop`은 생성·합성을 취소하고 현재 장치 재생 및 대기 입력을 중지합니다.
+이미 표시한 텍스트와 기록은 유지하며, 합성·장치 오류가 나도 다음 입력을 받을 수 있습니다.
+`/quit`은 진행 중 작업과 클라이언트를 정리합니다. 프로그램이 만든 응답 ID로 저장한
+임시 WAV는 완료·실패·중지 시 삭제합니다. 독립 TTS CLI가 만든 WAV는 삭제하지 않습니다.
+설정 조합과 검증 범위는 [음성 파이프라인 문서](docs/voice-pipeline.md)를 참고하세요.
 
 실제 방송 플랫폼, VTube Studio, 장기 기억·벡터DB, 모델 학습은 포함하지 않습니다.
 설계 전체는 `skill.md`를 참고하세요. 설계에 기록된 목표가 현재 구현 완료를 뜻하지는 않습니다.

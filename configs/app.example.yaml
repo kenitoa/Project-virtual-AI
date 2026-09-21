@@ -19,6 +19,9 @@ tts:
   total_timeout_seconds: 120
   max_text_chars: 1000
   max_response_bytes: 20971520
+audio:
+  enabled: false
+  output_device: null  # null: 시스템 기본 출력; 장치 번호 또는 이름도 가능
 character_path: character.yaml
 limits:
   max_input_chars: 1000

@@ -9,6 +9,22 @@ import yaml
 
 
 @dataclass(frozen=True)
+class AudioSettings:
+    enabled: bool = False
+    output_device: int | str | None = None
+
+    def __post_init__(self):
+        if type(self.enabled) is not bool:
+            raise ValueError("audio.enabled must be a boolean")
+        device = self.output_device
+        if device is not None and not (
+            (type(device) is int and device >= 0)
+            or (isinstance(device, str) and 0 < len(device.strip()) <= 256)
+        ):
+            raise ValueError("audio.output_device must be null, an index or a name")
+
+
+@dataclass(frozen=True)
 class TTSSettings:
     enabled: bool = False
     base_url: str = "http://127.0.0.1:9880"
@@ -97,6 +113,7 @@ class Settings:
     blocked_terms: tuple[str, ...] = ()
     allowed_expressions: tuple[str, ...] = ("neutral", "happy", "sad")
     tts: TTSSettings = field(default_factory=TTSSettings)
+    audio: AudioSettings = field(default_factory=AudioSettings)
 
     def __post_init__(self):
         bounds = {
@@ -137,6 +154,8 @@ class Settings:
         _validate_base_url(self.base_url)
         if not isinstance(self.tts, TTSSettings):
             raise ValueError("tts must be TTSSettings")
+        if not isinstance(self.audio, AudioSettings):
+            raise ValueError("audio must be AudioSettings")
         if not isinstance(self.model, str) or not self.model.strip():
             raise ValueError("model must not be empty")
         for name in ("blocked_terms", "allowed_expressions"):
@@ -166,6 +185,7 @@ def load_config(path: Path) -> tuple[Settings, dict]:
         "character_path",
         "system_prompt_path",
         "tts",
+        "audio",
     }:
         raise ValueError("invalid app configuration")
     groups = {
@@ -199,6 +219,12 @@ def load_config(path: Path) -> tuple[Settings, dict]:
     if not isinstance(tts, dict) or set(tts) - set(TTSSettings.__dataclass_fields__):
         raise ValueError("invalid tts configuration")
     options = {"tts": TTSSettings(**tts)}
+    audio = data.get("audio", {})
+    if not isinstance(audio, dict) or set(audio) - set(
+        AudioSettings.__dataclass_fields__
+    ):
+        raise ValueError("invalid audio configuration")
+    options["audio"] = AudioSettings(**audio)
     for group, allowed in groups.items():
         values = data.get(group, {})
         if not isinstance(values, dict) or set(values) - allowed:
