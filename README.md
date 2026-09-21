@@ -2,7 +2,8 @@
 
 Python 기반 버추얼 AI 제어 프로그램의 초기 구성입니다.
 현재 mock 모드는 외부 서버·네트워크 호출·GPU 없이 고정 답변을 반환합니다.
-KoboldCpp 연결과 제한된 최근 대화 기록을 지원합니다. TTS와 방송 채팅은 후속 단계입니다.
+KoboldCpp 연결과 제한된 최근 대화 기록, 별도 명령의 GPT-SoVITS WAV 저장을 지원합니다.
+음성 재생과 방송 채팅은 후속 단계입니다.
 
 ## 설치와 실행
 
@@ -66,6 +67,24 @@ uv run --locked ruff format --check .
 INFO 로그는 응답 ID·대기 시간·LLM 시간·종료 상태를 stderr에 기록합니다.
 입력·답변·사용자 ID는 로그에 남기지 않습니다. `--log-level WARNING`으로 줄일 수 있습니다.
 
-실제 방송 플랫폼, GPT-SoVITS·VTube Studio, 장기 기억·벡터DB, 모델 학습은 포함하지 않습니다.
+## GPT-SoVITS WAV 한 건 저장
+
+운영자가 별도로 GPT-SoVITS `api_v2.py` 서버와 음성 모델을 준비합니다.
+로컬 `configs/app.yaml`에 예시의 `tts` 절을 추가하고 `enabled: true`, 서버 주소,
+사용 권한이 있는 참조 음성의 **서버 측 경로**와 전사문·언어를 지정합니다.
+
+```powershell
+python -m uv run --locked python -m virtual_ai.tts --config configs/app.yaml --output generated_audio/tts-test.wav
+```
+
+고정 문장 “안녕하세요. 음성 합성 테스트입니다.”를 비스트리밍 WAV로 저장합니다.
+성공 시 종료 코드 0, TTS 실패 1, 설정 오류 2, 키보드 취소 130입니다.
+같은 출력 경로의 파일은 정상 WAV 검증이 끝난 경우에만 교체합니다.
+기본값은 비활성화이며 텍스트 대화 명령에서 TTS를 자동 호출하지 않습니다.
+재생·OBS·LLM `Response.speech` 연결은 후속 범위입니다.
+실제 음성 합성 검증은 서버·모델·참조 음성 준비 후 진행하며,
+요청 필드와 검증 절차는 [백엔드 문서](docs/backends.md#GPT-SoVITS-WAV-클라이언트)를 따릅니다.
+
+실제 방송 플랫폼, VTube Studio, 장기 기억·벡터DB, 모델 학습은 포함하지 않습니다.
 설계 전체는 `skill.md`를 참고하세요. 설계에 기록된 목표가 현재 구현 완료를 뜻하지는 않습니다.
 항목별 구현·후속·외부 검증 상태는 [적용 현황](docs/skill-coverage.md)에 정리했습니다.

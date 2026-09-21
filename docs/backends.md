@@ -115,6 +115,80 @@ PowerShell에서 Python 스크립트에 한글을 파이프로 보낼 때는 `$O
 확인하세요. 자동 테스트 통과는 실제 모델의 응답 품질이나 서버 연결 성공을 뜻하지 않습니다.
 모델 및 외부 프로그램, 실제 대화 원문과 비밀값은 커밋하지 않습니다.
 
+## GPT-SoVITS WAV 클라이언트
+
+`feat/tts-client`의 범위는 고정 한국어 문장 한 건의 WAV 저장입니다.
+[공식 api_v2.py](https://github.com/RVC-Boss/GPT-SoVITS/blob/main/api_v2.py)의
+`POST /tts`를 사용하며 `media_type: wav`, `streaming_mode: false`를 전송합니다.
+언어, 참조 음성 경로, 참조 음성 전사문은 운영자가 설정합니다.
+
+### 운영자 준비
+
+1. GPT-SoVITS를 별도 디렉터리·Python 환경에서 설치합니다.
+   한국어를 지원하는 서버/모델 버전과 사용할 음성 모델을 지정합니다.
+   [공식 서버 설정 예시](https://github.com/RVC-Boss/GPT-SoVITS/blob/main/GPT_SoVITS/configs/tts_infer.yaml)의
+   `custom.version`, `t2s_weights_path`, `vits_weights_path`, `device` 등을 실제 설치에 맞춥니다.
+   클라이언트가 모델 교체 API를 자동 호출하지 않습니다.
+2. 사용 권한이 있는 참조 음성과 해당 음성의 실제 전사문을 준비합니다.
+   `ref_audio_path`는 **GPT-SoVITS 서버가 읽을 수 있는 경로**이며 업로드 기능은 없습니다.
+   상대 경로는 서버 작업 디렉터리 기준입니다. 클라이언트 설정 폴더 기준으로 변환하지 않습니다.
+3. GPT-SoVITS 디렉터리의 해당 Python 환경에서 서버를 실행합니다.
+
+```powershell
+python api_v2.py -a 127.0.0.1 -p 9880 -c GPT_SoVITS/configs/tts_infer.yaml
+```
+
+4. 기존 로컬 `configs/app.yaml`을 덮어쓰지 않고 다음 절을 추가·수정합니다.
+   아래 참조 경로는 예시이므로 운영자가 실제 파일을 지정해야 합니다.
+
+```yaml
+tts:
+  enabled: true
+  base_url: http://127.0.0.1:9880
+  ref_audio_path: "C:/authorized-voice/reference.wav"
+  prompt_text: "참조 음성에서 실제로 말한 내용을 여기에 입력합니다."
+  prompt_lang: ko
+  text_lang: ko
+  timeout_seconds: 60
+  total_timeout_seconds: 120
+  max_text_chars: 1000
+  max_response_bytes: 20971520
+```
+
+5. 이 저장소에서 실행합니다. 기본 고정 문장을 합성하며 LLM 요청은 발생하지 않습니다.
+
+```powershell
+python -m uv run --locked python -m virtual_ai.tts --config configs/app.yaml --output generated_audio/tts-test.wav
+$LASTEXITCODE
+```
+
+종료 코드 0과 WAV 존재를 확인합니다. 클라이언트는 WAV Content-Type, RIFF 길이·청크,
+PCM 형식, 채널 수(1 또는 2), 양수 샘플레이트·프레임 수 및 실제 프레임 길이를 검사합니다.
+오류 JSON, 스트리밍용 미완성 헤더, 잘린 파일, 비어 있는 오디오 데이터는 저장하지 않습니다.
+음질·발음·무음 여부는 이 구조 검사로 판정할 수 없습니다.
+
+빈 문자열·길이 초과는 전송 전에 거절합니다. HTTP 단계별 및 전체 시간 제한,
+응답 크기 제한을 적용하고 자동 재시도는 하지 않습니다. 오류 응답 원문이나 전사문을
+로그에 출력하지 않습니다. `tts_seconds`는 합성 요청부터 검증·저장·연결 종료까지의
+시간이며 실제 음성 재생 시작 시간이 아닙니다.
+실패·취소된 요청은 기존 출력 파일을 보존하고, 성공한 WAV만 같은 디렉터리의 임시
+파일을 통해 교체합니다. 취소를 무시한 늦은 응답도 저장하지 않습니다.
+GPU 추론 중단과 이후 재생 큐 취소는 별도 검증 대상이며 이번 범위에 재생기는 없습니다.
+
+### 현재 검증 상태
+
+- 로컬 Windows / Python 3.11.16: TTS 36개를 포함한 전체 115개 테스트,
+  Ruff 검사·포맷 검사 및 기존 텍스트 CLI 실행 검사 통과.
+- 서버 없는 자동 검사: 요청 필드·정상 저장·오류 JSON·손상 WAV·시간 제한·크기 제한·
+  취소·늦은 응답·클라이언트 정리 검사 통과.
+- 테스트 HTTP 서버가 만든 PCM WAV를 실제 CLI로 받아 저장하는 검사 통과.
+  이는 HTTP/파일 경로 검사이며 GPT-SoVITS 음성 모델 합성 성공을 뜻하지 않습니다.
+- 실제 GPT-SoVITS: 기본 포트 9880에 리스너 없음. 사용할 서버 버전·음성 모델·
+  권한 있는 참조 음성이 지정되지 않아 **실제 고정 문장 합성과 음질은 미검증**입니다.
+- 실제 검증 시 서버 커밋/버전, GPT·SoVITS 모델 파일과 버전, 참조 음성 사용 권한 확인,
+  설정 언어, 장치, 응답 시간, WAV 채널·샘플레이트·프레임 수, 종료 코드를 추가 기록합니다.
+  참조 음성 원본·전사문·생성 오디오·개인 경로는 커밋하지 않습니다.
+
 ## 참고
 
 - [KoboldCpp 공식 API 안내](https://github.com/LostRuins/koboldcpp/wiki#with-chat-completions-how-do-i-control-how-many-tokens-the-ai-outputs)

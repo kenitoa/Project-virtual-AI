@@ -8,6 +8,17 @@ llm:
   timeout_seconds: 30  # 연결/읽기/쓰기/풀 대기 각각의 제한
   total_timeout_seconds: 60  # 재시도와 대기를 포함한 전체 호출 제한
   retries: 0  # 최초 시도 외 추가 시도; 최대 3
+tts:
+  enabled: false
+  base_url: http://127.0.0.1:9880
+  ref_audio_path: ""  # 사용 권한이 있는 참조 음성의 서버 측 경로
+  prompt_text: ""  # 참조 음성의 실제 전사문; 운영자가 지정
+  prompt_lang: ko
+  text_lang: ko
+  timeout_seconds: 60
+  total_timeout_seconds: 120
+  max_text_chars: 1000
+  max_response_bytes: 20971520
 character_path: character.yaml
 limits:
   max_input_chars: 1000
