@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "flood_per_cycle": 100,
+  "users": 12,
+  "scenarios": {
+    "llm_shutdown": [
+      "tests/test_cancellation.py",
+      "tests/test_koboldcpp.py"
+    ],
+    "tts_shutdown": [
+      "tests/test_tts.py",
+      "tests/test_voice_pipeline.py"
+    ],
+    "vts_shutdown": [
+      "tests/test_vts_client.py",
+      "tests/test_expression_pipeline.py"
+    ],
+    "device_removed": [
+      "tests/test_audio.py"
+    ],
+    "auth_expired": [
+      "tests/test_youtube_auth.py",
+      "tests/test_youtube_stream.py"
+    ],
+    "subtitle_locked": [
+      "tests/test_subtitles.py"
+    ],
+    "db_locked": [
+      "tests/test_memory_store.py::test_lock_failure_is_bounded_and_sanitized"
+    ],
+    "disk_full": [
+      "tests/test_memory_store.py::test_real_sqlite_capacity_failure_rolls_back"
+    ],
+    "chat_flood": [
+      "tests/test_input_overload.py"
+    ],
+    "repeated_controls": [
+      "tests/test_operator_controls.py",
+      "tests/integration"
+    ],
+    "quit_playing": [
+      "tests/test_voice_pipeline.py",
+      "tests/test_audio.py::test_console_stop_next_file_and_quit_while_playing"
+    ]
+  }
+}

@@ -28,6 +28,10 @@ class KoboldCppClient:
             timeout=settings.timeout_seconds, transport=transport, trust_env=False
         )
 
+    @property
+    def cleanup_confirmed(self):
+        return not self._blocked and not self._closed
+
     async def generate(self, messages):
         if self._closed:
             raise LLMError("LLM client is closed.")
@@ -171,6 +175,10 @@ class KoboldCppClient:
                     raise LLMError("LLM 응답 크기가 제한을 초과했습니다.")
         try:
             data = json.loads(body)
+            if data["choices"][0].get("finish_reason") == "length":
+                raise LLMError(
+                    "LLM 답변이 길이 제한으로 잘렸습니다. 짧게 다시 요청하세요."
+                )
             message = data["choices"][0]["message"]
             content = message["content"]
             if (

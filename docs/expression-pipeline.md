@@ -8,13 +8,16 @@
 
 `Response.expression`은 기존 `blocked` 뒤에 기본값 `neutral`로 추가했습니다.
 기존 다섯 번째 위치 인자의 차단 여부 의미는 유지하고, `prepare_response()`는 키워드 인자로
-응답을 생성합니다. 모델 프롬프트·출력 형식·감정 추출은 변경하지 않습니다.
+응답을 생성합니다. 모델 출력은 일반 텍스트이며 모델이 핫키·동작을 지정하지 않습니다.
 
-기본 표정은 항상 neutral입니다. `expressions.select_expression()`은 별도의 선택 정책 경계이며,
+정책을 주입하지 않은 기본 표정은 neutral입니다. CLI는 검사된 최종 답변의 명확한 축하·공감 문구를
+`conservative_expression()`으로 분류합니다. `expressions.select_expression()`은 별도의 선택 정책 경계이며,
 테스트와 프로그램 호출자는 `Application(..., expression_policy=...)`에 신뢰할 수 있는 콜백을
 주입할 수 있습니다. 콜백 후보는 `map_expression()`과 설정 허용 목록을 거칩니다.
 차단된 답변은 정책을 호출하지 않고 neutral로 처리하고, 문자열이 아닌 값·미허용 값도 neutral입니다.
-**표정 전달 경로의 구현이며 자동 감정 판단 구현이 아닙니다.**
+허용 후보는 neutral/happy/sad와 설정 허용 목록의 교집합입니다. 불확실·질문·인용·혼합 감정과
+정책 예외는 neutral로 돌아갑니다. 의미 기반 감정 모델이 아닌 보수적인 문구 규칙이며,
+[캐릭터 평가표](character-evaluation.md)의 실제 모델·화면 확인은 별도로 수행합니다.
 
 ## 설정과 순서
 

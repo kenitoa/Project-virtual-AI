@@ -1,5 +1,9 @@
 # character_path는 이 설정 파일의 폴더 기준입니다.
 youtube:
+  transport: rest # stream은 고정된 protobuf/gRPC streamList 경로. 자동 대체 없음
+  auth_mode: manual # oauth는 youtube-auth.md의 최초 승인과 방송 선택 후 사용
+  channel_id: ""
+  broadcast_id: ""
   enabled: false  # enable only after manual OBS recording verification
   live_chat_id: ""  # live chat ID, not a video ID; token in YOUTUBE_ACCESS_TOKEN
 llm:
@@ -7,7 +11,7 @@ llm:
   base_url: http://127.0.0.1:5001
   model: Qwen3-8B
   max_output_tokens: 256
-  context_tokens: 8192  # 실제 서버 한도에 맞춤; 입력 추정치 + 출력 토큰 예약
+  context_tokens: 4096  # 검증 기준 서버 --contextsize 4096과 일치; 서버 변경 시 함께 검증
   timeout_seconds: 30  # 연결/읽기/쓰기/풀 대기 각각의 제한
   total_timeout_seconds: 60  # 재시도와 대기를 포함한 전체 호출 제한
   server_abort_enabled: false  # enable only after verifying keyed abort; see docs/backends.md
@@ -55,6 +59,8 @@ limits:
   history_ttl_seconds: 3600
   max_viewers: 100
   queue_size: 20
+  queue_per_user: 2
+  queue_max_consecutive: 1 # 다른 사용자가 기다릴 때 적용
   queue_ttl_seconds: 30
 output:
   max_output_chars: 600

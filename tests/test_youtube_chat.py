@@ -15,7 +15,7 @@ from virtual_ai.config import YouTubeSettings, load_config
 from virtual_ai.integrations.youtube import ChatError, YouTubeChat, receive_chat
 
 
-def event(mid="m1", text="hello", age=0):
+def event(mid="m1", text="hello", age=-1):
     return {
         "id": mid,
         "authorDetails": {"channelId": "stable-user", "isChatOwner": True},
@@ -88,7 +88,7 @@ def test_conversion_backlog_duplicates_reconnect_and_poll_interval():
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("status", [401, 403, 404, 302])
+@pytest.mark.parametrize("status", [400, 401, 403, 404, 429, 302])
 def test_permanent_failure_is_not_retried_or_leaked(status):
     async def scenario():
         calls = []
@@ -105,7 +105,7 @@ def test_permanent_failure_is_not_retried_or_leaked(status):
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("failure", [429, 503, "timeout"])
+@pytest.mark.parametrize("failure", [503, "timeout"])
 def test_retry_budget_and_retry_after(failure):
     async def scenario():
         calls, delays = [], []
@@ -241,13 +241,21 @@ def test_chat_commands_are_data_and_failure_does_not_stop_app(caplog):
 
 
 @pytest.mark.parametrize("enabled", [False, True])
-def test_cli_lifecycle(monkeypatch, enabled):
+@pytest.mark.parametrize("transport", ["rest", "stream"])
+def test_cli_lifecycle(monkeypatch, enabled, transport):
     import virtual_ai.inputs.console as console_module
 
     async def scenario():
         settings, character = load_config(ROOT / "configs/app.example.yaml")
-        settings = replace(settings, youtube=YouTubeSettings(enabled, "chat"))
+        settings = replace(
+            settings, youtube=YouTubeSettings(enabled, "chat", transport=transport)
+        )
         monkeypatch.setattr(app_module, "load_config", lambda p: (settings, character))
+
+        async def checked(_):
+            return []
+
+        monkeypatch.setattr(app_module, "check_health", checked)
         started, stopped = asyncio.Event(), asyncio.Event()
 
         class Fake:
@@ -265,7 +273,11 @@ def test_cli_lifecycle(monkeypatch, enabled):
             if enabled:
                 await started.wait()
 
-        monkeypatch.setattr(app_module, "YouTubeChat", Fake)
+        monkeypatch.setattr(
+            app_module,
+            "YouTubeStream" if transport == "stream" else "YouTubeChat",
+            Fake,
+        )
         monkeypatch.setattr(console_module, "console", console)
         await app_module.run_cli(Namespace(config="unused", backend="mock", once=None))
         assert stopped.is_set() == enabled
@@ -289,3 +301,41 @@ def test_settings_and_config(tmp_path):
     path.write_text(yaml.safe_dump(data), encoding="utf-8")
     with pytest.raises(ValueError, match="youtube"):
         load_config(path)
+
+
+def test_rest_old_second_page_and_invalid_cursor_never_rebaseline():
+    async def run():
+        calls, got = [], []
+        pages = [
+            page([], "c1"),
+            page([event("old", age=5), event("fresh")], "c2"),
+            httpx.Response(
+                400,
+                json={
+                    "error": {
+                        "message": "private cursor",
+                        "errors": [{"reason": "pageTokenInvalid"}],
+                    }
+                },
+            ),
+        ]
+
+        def handler(request):
+            calls.append(request.url.params.get("pageToken"))
+            result = pages.pop(0)
+            return (
+                result
+                if isinstance(result, httpx.Response)
+                else httpx.Response(200, json=result)
+            )
+
+        async def sleep(_):
+            pass
+
+        with pytest.raises(ChatError) as error:
+            await adapter(handler, sleep).run(got.append)
+        assert error.value.reason == "rebaseline_required"
+        assert calls == [None, "c1", "c2"]
+        assert [m.message_id for m in got] == ["fresh"]
+
+    asyncio.run(run())

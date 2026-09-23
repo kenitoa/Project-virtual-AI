@@ -262,7 +262,7 @@ def test_previous_playback_callback_cannot_move_next_silent_mouth(tmp_path):
         player.finish.clear()
         player.level = 0
         before = len(avatar.mouth)
-        app.submit(item(message_id="second"))
+        app.submit(item(text="second request", message_id="second"))
         second = asyncio.create_task(app.process_next())
         await avatar.mouth_sent.wait()
         old_levels.publish(1, 100)

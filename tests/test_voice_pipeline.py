@@ -172,7 +172,7 @@ def test_speech_only_output_first_program_id_cleanup_and_privacy(tmp_path, caplo
 
 
 @pytest.mark.parametrize("case", ["tts_disabled", "audio_disabled", "empty_speech"])
-def test_text_only_paths_never_call_voice(tmp_path, case):
+def test_disabled_voice_and_code_only_fallback(tmp_path, case):
     async def run():
         app, llm, tts, player, output = build(
             tmp_path,
@@ -187,8 +187,14 @@ def test_text_only_paths_never_call_voice(tmp_path, case):
         app.submit(item())
         result = await app.process_next()
         assert output == [result.final]
-        assert not tts.calls and not player.calls
-        assert not (tmp_path / "audio").exists()
+        if case == "empty_speech":
+            assert result.blocked and "only code" not in result.speech
+            assert tts.calls[0][0] == result.speech
+            assert len(player.calls) == 1
+            assert not list((tmp_path / "audio").glob("*.wav"))
+        else:
+            assert not tts.calls and not player.calls
+            assert not (tmp_path / "audio").exists()
         await app.shutdown()
 
     asyncio.run(run())

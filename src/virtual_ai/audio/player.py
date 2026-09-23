@@ -68,6 +68,8 @@ class WAVPlayer:
         self._worker = None
         self._stop = threading.Event()
         self._closed = False
+        self.first_callback_at = None
+        self.audio_seconds = None
 
     async def _wait(self, worker, stop):
         cancelled = False
@@ -91,6 +93,8 @@ class WAVPlayer:
         if self._worker is not None and not self._worker.done():
             raise AudioError("이미 재생 중입니다. 먼저 중지하세요.")
         stop = self._stop = threading.Event()
+        self.first_callback_at = None
+        self.audio_seconds = None
         worker = self._worker = asyncio.get_running_loop().run_in_executor(
             None, self._play, path, stop, levels
         )
@@ -114,6 +118,7 @@ class WAVPlayer:
 
     def _play(self, path, stop, levels=None):
         pcm, channels, width, rate = _read_wav(path)
+        self.audio_seconds = len(pcm) / (channels * width * rate)
         if stop.is_set():
             return False
         backend = self._backend or load_backend()
@@ -136,6 +141,8 @@ class WAVPlayer:
                 end = min(position + frames * frame_size, len(pcm))
                 outdata[: end - position] = pcm[position:end]
                 position = end
+                if self.first_callback_at is None:
+                    self.first_callback_at = time.monotonic()
             except Exception:
                 errors.append(AudioError("오디오 출력 콜백이 실패했습니다."))
                 raise backend.CallbackAbort from None

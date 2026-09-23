@@ -18,6 +18,7 @@ class ChatInput:
     viewer: Viewer
     text: str
     message_id: str
+    published_at: float | None = None
 
 
 @dataclass(frozen=True)

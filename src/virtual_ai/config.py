@@ -13,6 +13,10 @@ import yaml
 class YouTubeSettings:
     enabled: bool = False
     live_chat_id: str = ""
+    auth_mode: str = "manual"
+    channel_id: str = ""
+    broadcast_id: str = ""
+    transport: str = "rest"
 
     def __post_init__(self):
         if type(self.enabled) is not bool:
@@ -21,6 +25,16 @@ class YouTubeSettings:
             self.enabled and not self.live_chat_id.strip()
         ):
             raise ValueError("enabled youtube requires live_chat_id")
+        if self.auth_mode not in ("manual", "oauth"):
+            raise ValueError("youtube.auth_mode must be manual or oauth")
+        if self.transport not in ("rest", "stream"):
+            raise ValueError("youtube.transport must be rest or stream")
+        for name in ("channel_id", "broadcast_id"):
+            value = getattr(self, name)
+            if not isinstance(value, str) or (
+                self.enabled and self.auth_mode == "oauth" and not value.strip()
+            ):
+                raise ValueError("OAuth requires explicit channel_id and broadcast_id")
 
 
 @dataclass(frozen=True)
@@ -255,6 +269,8 @@ class Settings:
     max_viewers: int = 100
     queue_size: int = 20
     queue_ttl_seconds: float = 30
+    queue_per_user: int = 2
+    queue_max_consecutive: int = 1
     blocked_terms: tuple[str, ...] = ()
     allowed_expressions: tuple[str, ...] = ("neutral", "happy", "sad")
     tts: TTSSettings = field(default_factory=TTSSettings)
@@ -275,6 +291,8 @@ class Settings:
             "history_chars": (1, 16000),
             "max_viewers": (1, 1000),
             "queue_size": (1, 1000),
+            "queue_per_user": (1, 1000),
+            "queue_max_consecutive": (1, 1000),
         }
         for name, (low, high) in bounds.items():
             value = getattr(self, name)
@@ -371,6 +389,8 @@ def load_config(path: Path) -> tuple[Settings, dict]:
             "max_viewers",
             "queue_size",
             "queue_ttl_seconds",
+            "queue_per_user",
+            "queue_max_consecutive",
         },
         "output": {
             "max_output_chars",
@@ -435,11 +455,22 @@ def load_config(path: Path) -> tuple[Settings, dict]:
         "address_term",
         "sentence_length",
     )
-    if not isinstance(character, dict) or any(
-        not isinstance(character.get(k), str) or not character[k].strip()
-        for k in required
+    if (
+        not isinstance(character, dict)
+        or set(character)
+        - set(required)
+        - {"unknown_facts", "frequent_expressions", "avoid_expressions", "examples"}
+        or any(
+            not isinstance(character.get(k), str) or not character[k].strip()
+            for k in required
+        )
     ):
         raise ValueError("invalid character configuration")
+    if "unknown_facts" in character and (
+        not isinstance(character["unknown_facts"], str)
+        or not character["unknown_facts"].strip()
+    ):
+        raise ValueError("invalid character unknown_facts")
     for key in ("frequent_expressions", "avoid_expressions"):
         if not isinstance(character.get(key, []), list) or any(
             not isinstance(v, str) for v in character.get(key, [])
@@ -448,6 +479,7 @@ def load_config(path: Path) -> tuple[Settings, dict]:
     examples = character.get("examples", [])
     if not isinstance(examples, list) or any(
         not isinstance(e, dict)
+        or set(e) != {"user", "assistant"}
         or any(not isinstance(e.get(k), str) for k in ("user", "assistant"))
         for e in examples
     ):

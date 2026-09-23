@@ -217,7 +217,7 @@ def test_audio_abort_precedes_subtitle_clear_and_old_stop_keeps_new_answer(tmp_p
         await entered.wait()
         assert path.read_text(encoding="utf-8") == first.final
         app.llm.text = "새 답변입니다."
-        app.submit(item(message_id="next"))
+        app.submit(item(text="next request", message_id="next"))
         second = await app.process_next()
         release.set()
         await stop

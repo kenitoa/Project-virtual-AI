@@ -10,6 +10,7 @@ class MouthSync:
     def __init__(self, settings, send, valid):
         self.settings, self.send, self.valid = settings, send, valid
         self.levels = PlaybackLevels()
+        self.first_send_at = None
         self.stopped = asyncio.Event()
         self.task = asyncio.create_task(self.run())
 
@@ -26,6 +27,8 @@ class MouthSync:
                 value += self.settings.lipsync_smoothing * (target - value)
                 if target == 0:
                     value = 0.0
+                if self.first_send_at is None:
+                    self.first_send_at = time.monotonic()
                 await self.send(
                     value, valid=lambda: not self.stopped.is_set() and self.valid()
                 )

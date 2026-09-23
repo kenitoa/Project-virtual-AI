@@ -1,12 +1,49 @@
 # Project-virtual-AI
 
+v1.0의 필수 범위, 단계별 검증 순서와 후속 확장은 [v1.0 완료 기준](docs/v1-completion.md)을 따릅니다.
+
+**v1.0.0 승인 보류:** 실제 검증과 main/CI/새 환경 재현 증거가 남아 있습니다.
+[최종 판정](docs/release-approval.md)과 [릴리스 노트 초안](docs/release-notes-v1.0.0.md)을 참고하세요.
+
+Windows 설치·실행·정상/비상 종료는 [운영 안내](docs/operator-guide.md)를 따릅니다.
+업데이트 전에는 [복구·DB 백업](docs/recovery.md), [설정·보관 정책](docs/privacy-and-retention.md)을 확인합니다.
+변경 내역은 [CHANGELOG](CHANGELOG.md)에 기록하며 현재는 Unreleased입니다.
+제한된 실제 방송은 [수용 절차](docs/live-acceptance.md)와 [결과 양식](docs/live-acceptance-record-template.md)을 사용합니다. 현재 실제 검증은 준비 대기입니다.
+
 Python 기반 버추얼 AI 제어 프로그램의 초기 구성입니다.
 현재 mock 모드는 외부 서버·네트워크 호출·GPU 없이 고정 답변을 반환합니다.
 KoboldCpp 연결과 제한된 최근 대화 기록, GPT-SoVITS WAV 저장·재생 및 답변의 음성 출력을 지원합니다.
 음성 합성·재생 중지와 텍스트 대화 유지가 구현되어 있으며, 실제 청취 검증은 진행 중입니다.
-VTube Studio 연결과 방송 채팅은 후속 단계입니다.
+선택적 VTube Studio 표정·립싱크, OBS 파일 자막, YouTube 채팅 수신 코드는 구현되어 있습니다.
+실제 모델·녹화·채팅 수신 검증은 대기입니다. [검증 현황](docs/validation-status.md)을 참고하세요.
+
+방송 실행에는 `--live`를 사용합니다. YouTube 수신 활성화 시에도 기본 일시 정지로 시작합니다.
+`/pause`, `/resume`, `/mute`, `/unmute`, `/status`, `/panic`, `/recover`의 동작과
+OBS 수동 음소거는 [운영 제어](docs/operator-controls.md)를 따릅니다.
 
 ## 설치와 실행
+
+발화 없는 설정·서버·장치·파일 진단:
+
+```powershell
+python -m uv run --locked python -m virtual_ai.diagnostics --config configs/app.yaml
+```
+
+라이브·YouTube 활성 실행은 시작 점검을 자동 수행합니다. 일반 실행은 `--check-startup`으로 적용합니다.
+원인별 상태와 지연 해석은 [문제 해결](docs/troubleshooting.md)을 참고하세요.
+
+YouTube 운영용 Desktop OAuth 승인·OS 토큰 저장·갱신·방송 선택은 [인증 안내](docs/youtube-auth.md)를 따릅니다.
+기존 수동 토큰 방식도 유지하며 실제 계정 승인·수신 검증은 별도로 진행합니다.
+전송 선택과 실제 수신·재접속 시험은 [YouTube 스트리밍 검증](docs/youtube-stream.md)을 참고하세요.
+사용자별 대기 상한·순환 선택·반복 제외·폐기 집계는 [채팅 선택 정책](docs/chat-selection.md)을 따릅니다.
+선택적 SQLite 저장소는 [장기 기억](docs/memory.md)을 참고하세요. 기본 비활성이며 로컬 운영자가 승인한
+검증 정보만 저장합니다. 기존 RAM 기록과 분리되고 YouTube 자동 저장은 하지 않습니다.
+`--memory-db`로 로컬 사용자·세션의 관련 기억 조회를 켜고, `/summarize`로 유휴 시 발췌 요약,
+`/forget-long`으로 장기 삭제를 실행합니다. `/forget`은 RAM만 지웁니다.
+선택적 [마이크·STT](docs/stt.md)는 별도 faster-whisper 환경과 로컬 Push-to-talk를 사용합니다.
+기본 비활성이며 실제 한국어 음성·마이크 검증은 준비 대기입니다.
+고정 질문 반복 측정과 중앙값·p95, 자원 사용량 및 실제 통합 검증 범위는 [성능 측정](docs/performance.md)에 정리했습니다.
+장애별 기대 동작, 반복 통합·과부하·지속 실행 절차와 실제 장치 대기 항목은 [수용 시험](docs/acceptance-tests.md)을 따릅니다.
 
 Python 3.11 이상과 uv를 설치한 뒤 저장소 루트에서 실행합니다.
 
@@ -19,7 +56,8 @@ uv run --locked python -m virtual_ai --backend mock --once "안녕"
 콘솔의 `/stop`은 대기열을 비우고 실행 중인 생성 작업을 취소합니다. 늦게 도착한 결과는
 출력하지 않으며 다음 입력은 계속 처리합니다. `/quit` 또는 EOF는 worker와 클라이언트를 정리하고 종료합니다.
 일반 시청자 메시지의 `/stop`은 대화 데이터로만 처리합니다.
-Python HTTP 요청 취소가 KoboldCpp의 GPU 추론 즉시 중단을 보장하지는 않습니다. 서버 측 중단은 미검증입니다.
+Python HTTP 요청 취소만으로 GPU 추론 중단을 보장하지 않습니다. 지원 구성의 요청별 서버 중단은
+검증했으며, 정리가 불명인 경우 다음 생성과 운영자 재개를 차단합니다. [백엔드 기록](docs/backends.md)을 참고하세요.
 설정 예시는 `configs/app.example.yaml`, 캐릭터 설정은 `configs/character.yaml`입니다.
 `--config configs/app.yaml`로 별도 설정을 사용할 수 있으며 잘못된 설정은 종료 코드 2로 안내합니다.
 `character_path`는 해당 YAML 폴더 기준입니다. `fake`는 기존 명령 호환을 위한 mock 별칭입니다.
@@ -120,6 +158,8 @@ python -m uv run --locked python -m virtual_ai --config configs/app.yaml
 임시 WAV는 완료·실패·중지 시 삭제합니다. 독립 TTS CLI가 만든 WAV는 삭제하지 않습니다.
 설정 조합과 검증 범위는 [음성 파이프라인 문서](docs/voice-pipeline.md)를 참고하세요.
 
-실제 방송 플랫폼, VTube Studio, 장기 기억·벡터DB, 모델 학습은 포함하지 않습니다.
+YouTube·VTube Studio의 실제 방송 검증은 대기 중입니다. 선택적 로컬 SQLite 기억은 구현되어 있으며,
+벡터DB와 모델 학습은 포함하지 않습니다.
 설계 전체는 `skill.md`를 참고하세요. 설계에 기록된 목표가 현재 구현 완료를 뜻하지는 않습니다.
 항목별 구현·후속·외부 검증 상태는 [적용 현황](docs/skill-coverage.md)에 정리했습니다.
+단계별 구현과 현재 작업 폴더 검증 결과: [구현 점검](docs/implementation-audit.md). 별도 readiness worktree의 후속 코드를 현재 폴더에 통합했으며, 실제 방송 검증과 v1.0.0 승인은 대기 중입니다.

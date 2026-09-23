@@ -155,7 +155,7 @@ def test_avatar_failure_preserves_text_voice_and_next_response(tmp_path, caplog,
             tmp_path, avatar, policy=lambda response: "happy"
         )
         for i in range(2):
-            app.submit(item(message_id=str(i)))
+            app.submit(item(text=f"request {i}", message_id=str(i)))
             await app.process_next()
         assert len(output) == len(player.calls) == 2
         assert avatar.calls.count("happy") == 1
@@ -211,7 +211,7 @@ def test_audio_stop_precedes_reset_and_old_cleanup_blocks_new_avatar(tmp_path):
         await app.stop()
         await avatar.started.wait()
         assert events.index("audio_stop") < events.index("reset")
-        app.submit(item(message_id="second"))
+        app.submit(item(text="second request", message_id="second"))
         second = asyncio.create_task(app.process_next())
         await asyncio.sleep(0)
         assert avatar.calls == ["happy", "reset"]
@@ -235,7 +235,7 @@ def test_timeout_quarantines_late_requests_without_blocking_voice(tmp_path, stag
         await app.process_next()
         await avatar.cancelled.wait()
         previous = list(avatar.calls)
-        app.submit(item(message_id="second"))
+        app.submit(item(text="second request", message_id="second"))
         await app.process_next()
         assert len(player.calls) == 2
         assert avatar.calls == previous
@@ -262,7 +262,7 @@ def test_stop_during_avatar_wait_is_immediate_and_stale_audio_is_blocked(tmp_pat
         assert not player.calls
         avatar.release.set()
         await asyncio.sleep(0)
-        app.submit(item(message_id="second"))
+        app.submit(item(text="second request", message_id="second"))
         await app.process_next()
         assert avatar.calls == ["happy"]
         assert len(player.calls) == 1

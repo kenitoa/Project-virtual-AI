@@ -1,5 +1,30 @@
 # 백엔드
 
+## 검증 기간 고정 구성 (2026-09-23)
+
+자산 권한·선택 상태는 [자산 목록](assets.md), 재현 순서는 [설치](setup.md)를 따른다. 아래 엔진 구성은 기존 로컬 검증용이며 방송용 음성 준비 완료를 뜻하지 않는다. 이번에는 서버를 시작하거나 추론·합성·재생하지 않았다.
+
+| 항목 | 고정값 / 이번 확인 |
+| --- | --- |
+| 앱 기준 | `04564f1134dd330d77a164904190087ab59d1c23` + readiness 문서·예시 설정 변경; 앱 소스 불변 |
+| OS·앱 환경 | Windows 11 build 26200, Python 3.14.7, uv 0.12.16; 앱 의존성은 `uv.lock` |
+| GPU | 이번 조회: RTX 4050 Laptop, 6141 MiB, 드라이버 610.78 |
+| KoboldCpp | 1.121, 아래 설치 파일 SHA-256 유지; 실제 실행 서버 버전은 재실행 시 확인 |
+| GGUF | Qwen3-8B-Q4_K_M.gguf, 아래 revision·SHA-256 유지 |
+| 컨텍스트·오프로딩 | 서버 `--contextsize 4096 --usecuda 0 --gpulayers 24`; 클라이언트 `llm.context_tokens: 4096` |
+| 채팅 템플릿 | 모델 내장 Jinja, `--jinja --jinjathink false` |
+| GPT-SoVITS | 로컬 Git HEAD `48b1a0169a28582a8984402f82cf438d3bfa6aca` 재확인 |
+| TTS 설정 | `GPT_SoVITS/configs/tts_infer.yaml`의 custom: v2, cuda, is_half=true |
+| GPT 가중치 | `GPT_SoVITS/pretrained_models/gsv-v2final-pretrained/s1bert25hz-5kh-longer-epoch=12-step=369668.ckpt` |
+| SoVITS 가중치 | `GPT_SoVITS/pretrained_models/gsv-v2final-pretrained/s2G2333k.pth` |
+| TTS 환경 | 별도 Python 3.10.21, torch/torchaudio 2.5.1+cu124, transformers 4.51.3, setuptools 80.10.2를 이번 설치 메타데이터에서 확인 |
+
+기존 원본 `configs/app.yaml`도 컨텍스트 4096임을 읽기 전용으로 확인했다. readiness의 예시를 8192에서 4096으로 수정했으며 원본 설정은 변경하지 않았다. 서버 실행 옵션을 바꾸면 클라이언트 예산도 함께 바꾸고 재검증한다. 클라이언트 설정이 서버 컨텍스트를 변경해 주지는 않는다.
+
+이번 KoboldCpp 실행 파일·GGUF 해시는 아래 기존 SHA-256과 일치했다. TTS `uv pip check`는 112개 패키지 호환성 검사를 통과했다. 전체 의존성 스냅샷은 readiness의 `.local/readiness/tts-requirements.txt`, GPT·SoVITS 및 보조 모델 8개 파일의 SHA-256은 `.local/readiness/tts-model-sha256.json`에 보관했다. 두 파일은 Git 제외이며 다른 개발자에게 별도로 전달해야 한다. 이는 기존 로컬 설치 식별 증거이고 새 환경 설치·방송 권한 확인은 아니다.
+
+외부 엔진·모델은 원본 폴더의 Git 제외 `backends/`, `models/`에 있고 새 worktree에 자동 복사되지 않는다. 아래 상대 경로 실행 명령은 **자산이 설치된 원본 루트** 기준이다. 새 개발자는 허가된 동일 자산을 자신의 엔진 루트에 준비한다. TTS 의존성은 앱 `uv.lock`에 섞지 않는다.
+
 `mock`/`fake`는 네트워크 없이 고정 응답을 제공합니다. `koboldcpp`는 재사용하는
 `httpx.AsyncClient`로 POST `/v1/chat/completions`를 호출합니다.
 기존 LLMClient 계약의 `generate(messages)`, `aclose()`를 구현하며 종료 시 연결을 닫습니다.

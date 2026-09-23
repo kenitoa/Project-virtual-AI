@@ -9,13 +9,14 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
+        python: ["3.11", "3.12", "3.13", "3.14"]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
           version: "0.12.16"
-          python-version: "3.11"
+          python-version: ${{ matrix.python }}
       - run: uv sync --locked
       - name: Tests
         run: uv run --locked pytest
@@ -23,3 +24,5 @@ jobs:
       - run: uv run --locked ruff format --check .
       - name: Entry point smoke check
         run: uv run --locked python -m virtual_ai --backend mock --once hello
+      - name: Repeated offline acceptance
+        run: uv run --locked python scripts/run_acceptance.py --repeat 2 --output .local/acceptance-ci
