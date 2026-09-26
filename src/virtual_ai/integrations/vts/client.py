@@ -276,7 +276,9 @@ class VTSClient:
                 not isinstance(item, dict)
                 or not _text(item.get("hotkeyID"), 128)
                 or item["hotkeyID"] in seen
-                or not _text(item.get("name"))
+                # VTS bundled models can contain unnamed animation hotkeys.
+                # The display name is not an action identity or authorization.
+                or not (item.get("name") == "" or _text(item.get("name")))
                 or not _text(item.get("type"))
                 or not isinstance(item.get("file"), str)
             ):

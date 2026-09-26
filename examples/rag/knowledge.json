@@ -1,0 +1,8 @@
+{
+  "source": "synthetic-demo/exchange",
+  "title": "예시 게임 교환 규칙",
+  "version": "1",
+  "content": "일반 아이템은 교환할 수 있습니다. 단, 이벤트 보상은 교환할 수 없습니다.",
+  "fact_key": "demo.exchange",
+  "days": 30
+}

@@ -49,3 +49,14 @@ def select_expression(response, allowed, policy=None):
         return map_expression(policy(response), allowed)
     except Exception:
         return "neutral"
+
+
+def dialogue_expression(response, turn, allowed, policy=None):
+    if response.blocked or turn.mode in ("empathy", "correction", "clarify", "answer"):
+        return "neutral"
+    # The model cannot supply arbitrary gestures; the planned intent and inspected
+    # text must both agree before showing a stronger expression.
+    chosen = select_expression(response, allowed, policy or conservative_expression)
+    if turn.mood == "happy" and chosen == "happy":
+        return map_expression("happy", allowed)
+    return "neutral"

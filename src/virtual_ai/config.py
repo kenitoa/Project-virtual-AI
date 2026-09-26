@@ -8,6 +8,31 @@ from urllib.parse import urlsplit
 
 import yaml
 
+from virtual_ai.dialogue import DialogueSettings
+from virtual_ai.rag.settings import RAGSettings
+
+
+@dataclass(frozen=True)
+class ChzzkSettings:
+    enabled: bool = False
+    channel_id: str = ""
+
+    def __post_init__(self):
+        if type(self.enabled) is not bool:
+            raise ValueError("chzzk.enabled must be a boolean")
+        if (
+            not isinstance(self.channel_id, str)
+            or (
+                self.channel_id
+                and (
+                    len(self.channel_id) != 32
+                    or any(c not in "0123456789abcdef" for c in self.channel_id)
+                )
+            )
+            or (self.enabled and not self.channel_id)
+        ):
+            raise ValueError("chzzk.channel_id must be a channel ID")
+
 
 @dataclass(frozen=True)
 class YouTubeSettings:
@@ -252,6 +277,8 @@ class Settings:
     backend: str = "fake"
     base_url: str = "http://127.0.0.1:5001"
     model: str = "Qwen3-8B"
+    temperature: float | None = None
+    top_p: float | None = None
     max_output_tokens: int = 256
     context_tokens: int = 8192
     system_prompt_path: str = str(Path(__file__).with_name("system_prompt.md"))
@@ -278,6 +305,9 @@ class Settings:
     vts: VTSSettings = field(default_factory=VTSSettings)
     subtitles: SubtitleSettings = field(default_factory=SubtitleSettings)
     youtube: YouTubeSettings = field(default_factory=YouTubeSettings)
+    chzzk: ChzzkSettings = field(default_factory=ChzzkSettings)
+    rag: RAGSettings = field(default_factory=RAGSettings)
+    dialogue: DialogueSettings = field(default_factory=DialogueSettings)
 
     def __post_init__(self):
         bounds = {
@@ -286,7 +316,7 @@ class Settings:
             "retries": (0, 3),
             "max_input_chars": (1, 4000),
             "max_output_chars": (1, 2000),
-            "max_sentences": (1, 3),
+            "max_sentences": (1, 8),
             "history_turns": (0, 20),
             "history_chars": (1, 16000),
             "max_viewers": (1, 1000),
@@ -298,6 +328,15 @@ class Settings:
             value = getattr(self, name)
             if type(value) is not int or not low <= value <= high:
                 raise ValueError(f"{name} must be an integer in [{low}, {high}]")
+        for name, upper in (("temperature", 2), ("top_p", 1)):
+            value = getattr(self, name)
+            if value is not None and (
+                type(value) not in (int, float)
+                or not math.isfinite(value)
+                or not 0 <= value <= upper
+                or (name == "top_p" and value == 0)
+            ):
+                raise ValueError(f"invalid {name}")
         for name in (
             "timeout_seconds",
             "total_timeout_seconds",
@@ -333,6 +372,12 @@ class Settings:
             raise ValueError("subtitles must be SubtitleSettings")
         if not isinstance(self.youtube, YouTubeSettings):
             raise ValueError("youtube must be YouTubeSettings")
+        if not isinstance(self.chzzk, ChzzkSettings):
+            raise ValueError("chzzk must be ChzzkSettings")
+        if not isinstance(self.rag, RAGSettings):
+            raise ValueError("rag must be RAGSettings")
+        if not isinstance(self.dialogue, DialogueSettings):
+            raise ValueError("dialogue must be DialogueSettings")
         if not isinstance(self.model, str) or not self.model.strip():
             raise ValueError("model must not be empty")
         for name in ("blocked_terms", "allowed_expressions"):
@@ -366,6 +411,9 @@ def load_config(path: Path) -> tuple[Settings, dict]:
         "vts",
         "subtitles",
         "youtube",
+        "chzzk",
+        "rag",
+        "dialogue",
     }:
         raise ValueError("invalid app configuration")
     groups = {
@@ -373,6 +421,8 @@ def load_config(path: Path) -> tuple[Settings, dict]:
             "backend",
             "base_url",
             "model",
+            "temperature",
+            "top_p",
             "max_output_tokens",
             "context_tokens",
             "timeout_seconds",
@@ -415,6 +465,22 @@ def load_config(path: Path) -> tuple[Settings, dict]:
     ):
         raise ValueError("invalid youtube configuration")
     options["youtube"] = YouTubeSettings(**youtube)
+    chzzk = data.get("chzzk", {})
+    if not isinstance(chzzk, dict) or set(chzzk) - set(
+        ChzzkSettings.__dataclass_fields__
+    ):
+        raise ValueError("invalid chzzk configuration")
+    options["chzzk"] = ChzzkSettings(**chzzk)
+    rag = data.get("rag", {})
+    if not isinstance(rag, dict) or set(rag) - set(RAGSettings.__dataclass_fields__):
+        raise ValueError("invalid rag configuration")
+    options["rag"] = RAGSettings(**rag)
+    dialogue = data.get("dialogue", {})
+    if not isinstance(dialogue, dict) or set(dialogue) - set(
+        DialogueSettings.__dataclass_fields__
+    ):
+        raise ValueError("invalid dialogue configuration")
+    options["dialogue"] = DialogueSettings(**dialogue)
     subtitles = data.get("subtitles", {})
     if not isinstance(subtitles, dict) or set(subtitles) - set(
         SubtitleSettings.__dataclass_fields__
@@ -459,7 +525,14 @@ def load_config(path: Path) -> tuple[Settings, dict]:
         not isinstance(character, dict)
         or set(character)
         - set(required)
-        - {"unknown_facts", "frequent_expressions", "avoid_expressions", "examples"}
+        - {
+            "unknown_facts",
+            "frequent_expressions",
+            "avoid_expressions",
+            "examples",
+            "aliases",
+            "situation_rules",
+        }
         or any(
             not isinstance(character.get(k), str) or not character[k].strip()
             for k in required
@@ -471,7 +544,12 @@ def load_config(path: Path) -> tuple[Settings, dict]:
         or not character["unknown_facts"].strip()
     ):
         raise ValueError("invalid character unknown_facts")
-    for key in ("frequent_expressions", "avoid_expressions"):
+    for key in (
+        "frequent_expressions",
+        "avoid_expressions",
+        "aliases",
+        "situation_rules",
+    ):
         if not isinstance(character.get(key, []), list) or any(
             not isinstance(v, str) for v in character.get(key, [])
         ):

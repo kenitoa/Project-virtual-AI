@@ -131,6 +131,35 @@ class InputQueue:
         if self.policy is not None:
             self.policy.reset()
 
+    def coalesce_reactions(self, first, selected_at, window, *, ttl=6):
+        """Combine only pure reactions on the same platform in a short time window."""
+        from virtual_ai.dialogue import reaction_key
+
+        self._expire()
+        key = reaction_key(first.text)
+        if not key or first.viewer.platform == "console":
+            return 1
+        viewers = {first.viewer}
+        for _ in range(len(self._items)):
+            stamp, item = self._items[0]
+            if (
+                item.viewer.platform == first.viewer.platform
+                and abs(stamp - selected_at) <= window
+                and reaction_key(item.text) == key
+                and max(
+                    self.clock() - stamp,
+                    self.wall_clock() - item.published_at
+                    if item.published_at is not None
+                    else 0,
+                )
+                < ttl
+            ):
+                viewers.add(item.viewer)
+                self._drop("coalesced_reaction")
+            else:
+                self._items.append(self._items.popleft())
+        return len(viewers)
+
     def __len__(self):
         self._expire()
         return len(self._items)

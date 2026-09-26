@@ -1,0 +1,10 @@
+CREATE TABLE meta (version INTEGER NOT NULL, revision INTEGER NOT NULL);
+INSERT INTO meta VALUES (1, 0);
+CREATE TABLE subjects (id TEXT PRIMARY KEY, storage INTEGER NOT NULL, retrieval INTEGER NOT NULL, public INTEGER NOT NULL);
+CREATE TABLE documents (id TEXT PRIMARY KEY, scope TEXT NOT NULL, source TEXT NOT NULL, title TEXT NOT NULL, version TEXT NOT NULL, content TEXT NOT NULL, digest TEXT NOT NULL, state TEXT NOT NULL, created REAL NOT NULL, expires REAL NOT NULL, UNIQUE(scope, source, version));
+CREATE TABLE chunks (id TEXT PRIMARY KEY, document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE, ordinal INTEGER NOT NULL, text TEXT NOT NULL, fact_key TEXT NOT NULL, UNIQUE(document_id, ordinal));
+CREATE TABLE memories (id TEXT PRIMARY KEY, subject TEXT NOT NULL REFERENCES subjects(id) ON DELETE CASCADE, response_id TEXT NOT NULL, session_id TEXT NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL, evidence TEXT NOT NULL, state TEXT NOT NULL, created REAL NOT NULL, expires REAL NOT NULL, supersedes TEXT, UNIQUE(subject, response_id));
+CREATE TABLE vectors (chunk_id TEXT NOT NULL REFERENCES chunks(id) ON DELETE CASCADE, model TEXT NOT NULL, embedding TEXT NOT NULL, PRIMARY KEY(chunk_id, model));
+CREATE TABLE delivery (response_id TEXT PRIMARY KEY, subject TEXT NOT NULL REFERENCES subjects(id) ON DELETE CASCADE, displayed INTEGER NOT NULL, playback TEXT NOT NULL, expires REAL NOT NULL);
+CREATE INDEX document_scope ON documents(scope, state, expires);
+CREATE INDEX memory_subject ON memories(subject, state, expires);

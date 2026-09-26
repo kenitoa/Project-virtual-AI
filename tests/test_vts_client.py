@@ -118,6 +118,47 @@ def activations(socket):
     ]
 
 
+def test_unnamed_unmapped_hotkey_does_not_block_allowed_expression(tmp_path):
+    async def run():
+        client, socket = make_client(tmp_path)
+        socket.hotkeys.append(
+            {
+                "name": "",
+                "hotkeyID": "unmapped-animation",
+                "type": "TriggerAnimation",
+                "file": "Shock.motion3.json",
+            }
+        )
+        await client.connect(authenticate=True)
+        assert len((await client.list_hotkeys())["availableHotkeys"]) == 3
+        await client.set_expression("happy")
+        await client.reset()
+        assert activations(socket) == [
+            {"expressionFile": "happy.exp3.json", "active": True, "fadeTime": 0.25},
+            {"expressionFile": "happy.exp3.json", "active": False, "fadeTime": 0.25},
+        ]
+        assert not any(
+            call["messageType"] == "HotkeyTriggerRequest" for call in socket.calls
+        )
+        await client.aclose()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("name", [None, 42, [], "bad\nname", "x" * 257])
+def test_malformed_hotkey_display_name_still_rejected(tmp_path, name):
+    async def run():
+        client, socket = make_client(tmp_path)
+        socket.hotkeys[0]["name"] = name
+        await client.connect(authenticate=True)
+        with pytest.raises(AvatarError, match="hotkey entry"):
+            await client.set_expression("happy")
+        assert not activations(socket)
+        await client.aclose()
+
+    asyncio.run(run())
+
+
 def test_authentication_and_saved_token_reuse(tmp_path, caplog):
     async def run():
         client, socket = make_client(tmp_path)

@@ -163,6 +163,10 @@ class KoboldCppClient:
             "max_tokens": self.settings.max_output_tokens,
             "stream": False,
         }
+        for name in ("temperature", "top_p"):
+            value = getattr(self.settings, name)
+            if value is not None:
+                payload[name] = value
         if self.settings.server_abort_enabled:
             payload["genkey"] = genkey
         # enable_thinking is template-specific and intentionally not sent.

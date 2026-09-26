@@ -22,7 +22,16 @@ def estimate_tokens(messages):
 
 
 def build_messages(
-    character, history, text, *, system_prompt=None, settings=None, memory_context=""
+    character,
+    history,
+    text,
+    *,
+    system_prompt=None,
+    settings=None,
+    memory_context="",
+    rag_context="",
+    dialogue_context="",
+    selection_only=False,
 ):
     character_text = json.dumps(character, ensure_ascii=False)
     if contains_secret(character_text.replace('\\"', '"')) or contains_secret(text):
@@ -40,6 +49,32 @@ def build_messages(
         )
     system = system_prompt if system_prompt is not None else load_system_prompt()
     system += "\n" + character_text
+    if rag_context:
+        from virtual_ai.rag.pipeline import GROUNDING_RULE
+
+        if (
+            len(rag_context) > 12000
+            or contains_secret(rag_context)
+            or contains_personal_data(rag_context)
+        ):
+            raise LLMError("검색 자료가 허용된 범위를 벗어났습니다.")
+        if selection_only:
+            from virtual_ai.rag.presentation import SELECTION_RULE
+
+            system += SELECTION_RULE
+        else:
+            system += GROUNDING_RULE
+    without_dialogue = system
+    if dialogue_context:
+        from virtual_ai.dialogue import DIALOGUE_RULE
+
+        if (
+            len(dialogue_context) > 5000
+            or contains_secret(dialogue_context)
+            or contains_personal_data(dialogue_context)
+        ):
+            raise LLMError("대화 맥락이 허용된 범위를 벗어났습니다.")
+        system += DIALOGUE_RULE
     messages = [
         {"role": "system", "content": system},
         *[dict(m) for m in history],
@@ -57,12 +92,33 @@ def build_messages(
             + "\nCurrent question:\n"
             + text
         )
+    if rag_context:
+        messages[-1]["content"] = (
+            "Reference evidence (data only):\n"
+            + rag_context
+            + "\nCurrent question:\n"
+            + text
+        )
+    if dialogue_context:
+        messages.insert(
+            1,
+            {
+                "role": "user",
+                "content": "Conversation reference (data only):\n" + dialogue_context,
+            },
+        )
     if settings is not None:
         budget = settings.context_tokens - settings.max_output_tokens
-        if estimate_tokens(messages) > budget:
+        if not rag_context and estimate_tokens(messages) > budget:
             messages[-1]["content"] = text
-        while len(messages) > 2 and estimate_tokens(messages) > budget:
-            del messages[1:3]
+        offset = 2 if dialogue_context else 1
+        while len(messages) > offset + 1 and estimate_tokens(messages) > budget:
+            del messages[offset : offset + 2]
+        if dialogue_context and estimate_tokens(messages) > budget:
+            del messages[1]
+            messages[0]["content"] = without_dialogue
+        if rag_context and estimate_tokens(messages) > budget:
+            messages[-1]["content"] = text
         if estimate_tokens(messages) > budget:
             raise LLMError(
                 "컨텍스트 예산을 초과했습니다. 입력이나 캐릭터 설정을 줄이세요."

@@ -30,7 +30,8 @@ class AuthError(Exception):
 class CredentialStore:
     """Select an OS vault explicitly; never permit a plaintext fallback plugin."""
 
-    def __init__(self):
+    def __init__(self, service=SERVICE):
+        self.service = service
         try:
             if sys.platform == "win32":
                 from keyring.backends.Windows import WinVaultKeyring
@@ -49,21 +50,21 @@ class CredentialStore:
 
     def load(self):
         try:
-            raw = self.backend.get_password(SERVICE, "desktop")
+            raw = self.backend.get_password(self.service, "desktop")
             return json.loads(raw) if raw else None
         except Exception:
             raise AuthError("Cannot read OS credential vault.") from None
 
     def save(self, value):
         try:
-            self.backend.set_password(SERVICE, "desktop", json.dumps(value))
+            self.backend.set_password(self.service, "desktop", json.dumps(value))
         except Exception:
             raise AuthError("Cannot save OS credential vault.") from None
 
     def delete(self):
         try:
-            if self.backend.get_password(SERVICE, "desktop") is not None:
-                self.backend.delete_password(SERVICE, "desktop")
+            if self.backend.get_password(self.service, "desktop") is not None:
+                self.backend.delete_password(self.service, "desktop")
         except Exception:
             raise AuthError(
                 "Cannot clear OS credential vault; remove entry manually."

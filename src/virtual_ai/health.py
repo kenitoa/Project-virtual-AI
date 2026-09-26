@@ -184,6 +184,19 @@ async def check_health(
 
         await probe("youtube", youtube, enabled=settings.youtube.enabled)
 
+        async def chzzk():
+            from virtual_ai.integrations.chzzk_auth import ChzzkSession
+
+            try:
+                await ChzzkSession(transport=transport).verify(
+                    settings.chzzk.channel_id
+                )
+            except AuthError:
+                return RECOVERY, "authentication_or_channel_selection"
+            return DEGRADED, "authenticated_session_unverified"
+
+        await probe("chzzk", chzzk, enabled=settings.chzzk.enabled)
+
     async def tts():
         await tcp_probe(settings.tts.base_url)
         return DEGRADED, "tcp_only_model_unverified"
@@ -285,6 +298,16 @@ async def check_health(
             await avatar.aclose()
 
     await probe("vts", vts, enabled=settings.vts.enabled)
+
+    async def rag_check():
+        from virtual_ai.rag.store import RAGStore
+
+        # Starting an enabled store is explicit opt-in; disabled checks never touch it.
+        store = await asyncio.to_thread(RAGStore, settings.rag.db_path)
+        await asyncio.to_thread(store.revision)
+        return OK, "local_store_checked_model_quality_unverified"
+
+    await probe("rag", rag_check, enabled=settings.rag.enabled)
     return checks
 
 

@@ -2,6 +2,10 @@
 
 v1.0의 필수 범위, 단계별 검증 순서와 후속 확장은 [v1.0 완료 기준](docs/v1-completion.md)을 따릅니다.
 
+선택적 LLM·RAG 검색, 근거 검증, 시청자 기억 후보 승인·삭제와 운영 명령은
+[LLM·RAG 구현 계획](docs/llm-rag-plan.md)을 참고하세요. 기본 비활성이며
+[자동 검증과 실제 모델·장비 확인](docs/rag-validation.md)을 구분합니다.
+
 **v1.0.0 승인 보류:** 실제 검증과 main/CI/새 환경 재현 증거가 남아 있습니다.
 [최종 판정](docs/release-approval.md)과 [릴리스 노트 초안](docs/release-notes-v1.0.0.md)을 참고하세요.
 
@@ -161,5 +165,6 @@ python -m uv run --locked python -m virtual_ai --config configs/app.yaml
 YouTube·VTube Studio의 실제 방송 검증은 대기 중입니다. 선택적 로컬 SQLite 기억은 구현되어 있으며,
 벡터DB와 모델 학습은 포함하지 않습니다.
 설계 전체는 `skill.md`를 참고하세요. 설계에 기록된 목표가 현재 구현 완료를 뜻하지는 않습니다.
+선택적 대화 발전 기능은 `--dialogue`로 활성화합니다. 후속 질문·정정·기억 쿨다운·근거 말투·모델 비교 사용법은 [대화 확장 문서](docs/dialogue-development.md), 실행 결과는 [검증 기록](docs/dialogue-validation.md)에 있습니다.
 항목별 구현·후속·외부 검증 상태는 [적용 현황](docs/skill-coverage.md)에 정리했습니다.
 단계별 구현과 현재 작업 폴더 검증 결과: [구현 점검](docs/implementation-audit.md). 별도 readiness worktree의 후속 코드를 현재 폴더에 통합했으며, 실제 방송 검증과 v1.0.0 승인은 대기 중입니다.

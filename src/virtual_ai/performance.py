@@ -87,7 +87,7 @@ class TraceCapture(logging.Handler):
             self.response_id = match[1]
             self.stages[match[2]] = (match[3], float(match[4]))
         match = re.search(
-            r"response_id=[a-f0-9-]+ (queue_seconds|llm_seconds|tts_seconds|playback_seconds|audio_seconds|mouth_send_after_callback_seconds)=([0-9.]+)",
+            r"response_id=[a-f0-9-]+ (queue_seconds|retrieval_seconds|validation_seconds|llm_seconds|tts_seconds|playback_seconds|audio_seconds|mouth_send_after_callback_seconds)=([0-9.]+)",
             message,
         )
         if match:
@@ -152,8 +152,10 @@ async def benchmark(app, args):
     if (
         app.runtime.input_locked
         or app.settings.youtube.enabled
+        or app.settings.chzzk.enabled
         or app.microphone
         or app.memory
+        or (app.rag and app.rag.settings.memory_enabled)
     ):
         raise ValueError(
             "benchmark requires isolated, unlocked input; disable chat, microphone and memory"

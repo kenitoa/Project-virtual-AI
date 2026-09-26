@@ -1,0 +1,54 @@
+{
+  "description": "Synthetic regression conversations, not real viewers or an independent quality benchmark",
+  "documents": [["퍼즐 게임", "퍼즐 게임은 조각을 맞추는 게임입니다."], ["참여 규칙", "18세 이상만 참여할 수 있습니다. 단, 점검 중에는 참여할 수 없습니다."]],
+  "scenarios": [
+    {"id": "mixed-factual-intents", "turns": [
+      {"text": "너는 참여 규칙 알려줘, 실패해서 속상해", "mode": "answer", "contains": ["18세 이상만", "참여할 수 없어요"]},
+      {"text": "합격했어! 참여 조건은?", "mode": "answer", "contains": ["18세 이상만"]},
+      {"text": "너는 최신 뉴스 알려줘", "mode": "answer", "contains": ["최신 내용을 확인할 수 없어요"]}
+    ]},
+    {"id": "social-conversation", "turns": [
+      {"text": "퇴근하고 왔어", "mode": "chat"},
+      {"text": "오늘 피곤해서 쉬러 왔어", "mode": "chat"},
+      {"text": "잘 지냈어?", "mode": "chat"}
+    ]},
+    {"id": "negated-emotion", "turns": [
+      {"text": "속상하지 않아, 합격했어!", "mode": "celebrate", "forbidden": ["아쉬우셨겠어요"]}
+    ]},
+    {"id": "multiple-questions", "turns": [
+      {"text": "참여 규칙 설명해줘? 그리고 퍼즐 게임 설명해줘?", "mode": "answer", "contains": ["18세 이상만", "참여할 수 없어요", "조각을 맞추는 게임이에요"]}
+    ]},
+    {"id": "knowledge-followup", "turns": [
+      {"text": "퍼즐 게임 설명", "mode": "answer", "contains": ["조각을 맞추는 게임이에요"]},
+      {"text": "그럼 그거 다시 설명해줘", "mode": "answer", "contains": ["조각을 맞추는 게임이에요"]}
+    ]},
+    {"id": "conditions", "turns": [
+      {"text": "참여 규칙 설명해줘", "mode": "answer", "contains": ["18세 이상만", "점검 중에는 참여할 수 없어요"]}
+    ]},
+    {"id": "memory-correction", "turns": [
+      {"text": "내가 좋아하는 게임 기억해?", "mode": "answer", "contains": ["퍼즐 게임을 좋아한다고"]},
+      {"text": "아니, 나는 싫어한다고 했어.", "mode": "correction", "contains": ["지금 말씀하신"]},
+      {"text": "내가 싫어하는 게임 기억해?", "mode": "answer", "contains": ["퍼즐 게임을 싫어한다고"], "forbidden": ["좋아한다고"]}
+    ]},
+    {"id": "viewer-isolation", "turns": [
+      {"text": "퍼즐 게임 설명", "mode": "answer"},
+      {"text": "그럼 그거는?", "viewer": "bob", "mode": "clarify", "forbidden": ["조각"]},
+      {"text": "내가 좋아하는 게임 기억해?", "viewer": "bob", "mode": "answer", "forbidden": ["퍼즐"]}
+    ]},
+    {"id": "empathy", "turns": [
+      {"text": "게임을 못 깨서 속상해", "mode": "empathy", "forbidden": ["축하", "신나", "행복"]}
+    ]},
+    {"id": "greeting-repetition", "turns": [
+      {"text": "안녕", "mode": "greeting"},
+      {"text": "하이", "mode": "greeting", "different": true}
+    ]},
+    {"id": "selection", "turns": [
+      {"text": "@다른시청자 안녕", "mode": "skip_other_addressee", "skip": true},
+      {"text": "퍼즐 게임 설명", "mode": "answer"},
+      {"text": "퍼즐 게임 설명", "mode": "queue_repeated_content", "skip": true}
+    ]},
+    {"id": "uncertain-correction", "turns": [
+      {"text": "아니 그게 아니라", "mode": "clarify", "contains": ["어떤 부분"]}
+    ]}
+  ]
+}

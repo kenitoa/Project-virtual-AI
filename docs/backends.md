@@ -29,6 +29,7 @@
 `httpx.AsyncClient`로 POST `/v1/chat/completions`를 호출합니다.
 기존 LLMClient 계약의 `generate(messages)`, `aclose()`를 구현하며 종료 시 연결을 닫습니다.
 요청은 `model`, `messages`, `max_tokens`, `stream: false`로 구성합니다.
+추가 설정한 `temperature`, `top_p`도 요청으로 전달하며 미설정/null이면 생략합니다. 생방송 대화의 생성 시간 제한과 샘플링 조정은 [LLM 처리 보강](live-llm-readiness.md)을 참고하세요.
 응답 크기는 256 KiB로 제한하고 `choices[0].message.content`의 비어 있지 않은 문자열만 반환합니다.
 출력 검사는 `app.py`의 `prepare_response()`에서 수행합니다.
 

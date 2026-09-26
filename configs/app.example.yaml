@@ -1,4 +1,7 @@
 # character_path는 이 설정 파일의 폴더 기준입니다.
+chzzk:
+  enabled: false
+  channel_id: "" # OAuth 인증한 채널 ID. docs/chzzk-chat.md 참조
 youtube:
   transport: rest # stream은 고정된 protobuf/gRPC streamList 경로. 자동 대체 없음
   auth_mode: manual # oauth는 youtube-auth.md의 최초 승인과 방송 선택 후 사용
@@ -10,6 +13,8 @@ llm:
   backend: fake  # mock/fake는 고정 응답, 실제 서버는 koboldcpp
   base_url: http://127.0.0.1:5001
   model: Qwen3-8B
+  temperature: 0.65 # tuning starting point, not a verified model-quality guarantee
+  top_p: 0.9 # null omits this parameter and preserves server defaults
   max_output_tokens: 256
   context_tokens: 4096  # 검증 기준 서버 --contextsize 4096과 일치; 서버 변경 시 함께 검증
   timeout_seconds: 30  # 연결/읽기/쓰기/풀 대기 각각의 제한
@@ -67,3 +72,31 @@ output:
   max_sentences: 3
   blocked_terms: []  # 금지 문구 설정; 의미 기반 검사를 대체하지 않음
   allowed_expressions: [neutral, happy, sad]
+rag:
+  enabled: false
+  knowledge_enabled: true
+  memory_enabled: false
+  capture_candidates: false
+  db_path: .local/rag.sqlite3
+  scope: local
+  top_k: 3
+  context_chars: 3000
+  timeout_seconds: 0.5
+  retention_days: 30
+  # Optional separately started loopback /v1/embeddings service; no model download.
+  embedding_url: ""
+  embedding_model: ""
+  embedding_timeout_seconds: 0.3
+  semantic_threshold: 0.65
+dialogue:
+  enabled: false
+  style: polite
+  natural_grounding: true
+  contextual_memory: false
+  memory_cooldown_seconds: 600
+  reaction_window_seconds: 2
+  reaction_ttl_seconds: 6
+  answered_cooldown_seconds: 20
+  followup_every: 4
+  generation_timeout_seconds: 10 # public chat only; cancellation cleanup may add time
+  public_response_ttl_seconds: 20 # age from publication/receipt to display or playback start
