@@ -18,7 +18,7 @@ async def console(app):
     print(
         "RAG: /rag-status /rag-knowledge on|off /rag-memory on|off /rag-forget PLATFORM USER_ID"
     )
-    print("방송 상태: /state game|title VALUE")
+    print("방송 상태: /state game|title|topic VALUE, /mode talk|busy|focus|quiet")
     worker = asyncio.create_task(app.run())
     try:
         while True:
@@ -70,6 +70,12 @@ async def console(app):
                     )
                 except StoreError as exc:
                     print("rag_deleted=false reason=" + exc.reason)
+            elif command.startswith("/mode "):
+                try:
+                    await app.set_mode(command.split(maxsplit=1)[1])
+                    print("mode_updated=true")
+                except ValueError:
+                    print("mode_updated=false")
             elif command.startswith("/state "):
                 parts = command.split(maxsplit=2)
                 try:

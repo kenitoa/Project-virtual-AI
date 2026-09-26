@@ -106,9 +106,9 @@ class ChzzkChat:
         if (
             not -30 <= self.now() - published <= self.max_age
             or self._started_at is not None
-            and published < self._started_at
+            and published <= self._started_at
             or self.accept_after is not None
-            and published < self.accept_after()
+            and published <= self.accept_after()
         ):
             return None
         # The official event has no message ID. Bound deduplication by its stable fields.

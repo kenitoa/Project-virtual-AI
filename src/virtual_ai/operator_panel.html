@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI 방송 운영</title>
+<style nonce="__TOKEN__">
+*{box-sizing:border-box}body{margin:0;background:#111725;color:#e9eef8;font:16px/1.65 system-ui,sans-serif}main{max-width:1080px;margin:auto;padding:28px}h1{margin:0;font-size:28px}p{color:#adbcd4}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}.card{background:#1c2638;padding:22px;border:1px solid #344057;border-radius:12px;margin-top:18px}h2{font-size:18px;margin:0 0 12px}button,input,select{font:inherit;border-radius:7px;border:1px solid #66748d;padding:9px 12px;margin:4px;color:inherit;background:#27364d}button{cursor:pointer}button:focus-visible,input:focus-visible{outline:3px solid #9fbfff}button.primary{background:#234f9b}button.danger{background:#923341}button:disabled{opacity:.5}input[type=text]{width:100%;margin:6px 0}label{display:block;margin:8px 0}pre{white-space:pre-wrap;word-break:break-word;font-size:13px}#banner{padding:12px;border-radius:8px;background:#27364d}small{color:#adbcd4}table{width:100%;border-collapse:collapse}td{padding:6px;border-bottom:1px solid #344057}#notice{min-height:30px;color:#fbd7a2}
+</style><main>
+<h1>AI 방송 운영</h1><p>현재 상태를 확인하고 대화·음성·복구를 제어합니다.</p>
+<div id="banner" role="status">연결 확인 중…</div><div id="notice" role="alert"></div>
+<section class="card"><h2>대화 제어</h2><div id="controls">
+<button data-action="pause">일시 정지</button><button data-action="resume" class="primary">대화 재개</button><button data-action="stop">현재 답변 중지</button><button data-action="mute">음소거</button><button data-action="unmute">음성 허용</button><button data-action="panic" class="danger">비상 정지</button><button data-action="recover">복구 확인</button><button data-action="diagnose">일시 정지 후 상태 검사</button>
+</div><small>복구 확인 후에도 일시 정지·음소거는 유지됩니다. 대화 재개와 음성 허용을 각각 선택하세요.</small>
+<label>방송 모드 <select id="mode"><option value="talk">일반 대화</option><option value="busy">채팅 집중</option><option value="focus">진행 집중</option><option value="quiet">공개 채팅 발화 중지</option></select><button id="setmode">적용하고 현재 답변 중지</button></label>
+<label>운영자가 확인한 현재 주제<input id="topic" type="text" maxlength="200" placeholder="예: 오늘의 퍼즐 게임 참가 안내"></label><button id="settopic">주제 적용</button>
+</section><div class="grid"><section class="card"><h2>처리·출력 상태</h2><table id="state"></table></section><section class="card"><h2>최근 반응 시간</h2><table id="metrics"></table><small>실제 장치 콜백 관측 기준. 시청자의 청취 여부는 알 수 없습니다.</small></section></div>
+<section class="card"><h2>운영자 마이크</h2><button data-action="ptt_start">말하기 시작</button><button data-action="ptt_stop">녹음 완료</button><button data-action="ptt_cancel">녹음 취소</button><small>마이크를 설정한 경우 사용할 수 있습니다. 인식된 문장은 운영 명령으로 실행되지 않습니다.</small></section>
+<section class="card"><h2>로컬 대화 입력</h2><input id="text" type="text" maxlength="1000" placeholder="AI에게 전달할 문장"><button id="send">입력 보내기</button><small>여기에 쓴 /stop 같은 문구는 대화 데이터입니다. 제어 버튼을 사용하세요.</small></section>
+<section class="card"><h2>시청자 기억 관리</h2><p>플랫폼의 실제 사용자 ID를 확인한 운영자 전용입니다. 이 화면은 시청자의 동의를 대신 받지 않습니다.</p>
+<label>플랫폼 <select id="platform"><option>youtube</option><option>chzzk</option><option>console</option></select></label>
+<label>사용자 ID<input id="user" type="text" maxlength="256" autocomplete="off"></label>
+<label><input id="identity" type="checkbox">요청자의 본인 여부를 직접 확인했습니다.</label><label><input id="consent" type="checkbox">아래 선택에 대한 동의를 직접 확인했습니다.</label>
+<label><input id="storage" type="checkbox">저장 허용</label><label><input id="retrieval" type="checkbox">조회 허용</label><label><input id="public" type="checkbox">방송 공개 발화 허용</label>
+<button data-memory="inspect">기억 확인</button><button data-memory="consent">권한 기록</button><button data-memory="forget" class="danger">이 사용자 기억 삭제</button><button id="clearprivate">조회 내용 숨기기</button><pre id="private"></pre></section>
+<details class="card"><summary>진단 상세</summary><pre id="detail"></pre></details>
+</main><script nonce="__TOKEN__">
+const token='__TOKEN__', $=id=>document.getElementById(id);
+let memorySelection=0;
+function clearMemorySelection(){memorySelection++;$('private').textContent='';for(const id of ['identity','consent','storage','retrieval','public'])$(id).checked=false}
+async function request(path,data){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),data?15000:5000);try{const r=await fetch(path,{method:data?'POST':'GET',headers:{'X-Operator-Token':token,...(data?{'Content-Type':'application/json'}:{})},body:data?JSON.stringify(data):undefined,cache:'no-store',signal:controller.signal});if(!r.ok)throw Error('요청을 처리하지 못했습니다. 일시 정지·정리 상태와 입력값을 확인하세요.');return await r.json()}finally{clearTimeout(timer)}}
+async function command(data){const selected=memorySelection;try{const r=await request('/command',data);const changed=data.action.startsWith('memory_')&&selected!==memorySelection;$('notice').textContent=changed?'이전 대상 요청의 응답입니다. 현재 대상의 처리 결과가 아닙니다.':r.accepted===false?'요청이 거절됐습니다. 잠금·정리·대기열 상태를 확인하세요.':'요청을 처리했습니다.';if(r.private_memory&&!changed)$('private').textContent=JSON.stringify(r.private_memory,null,2);await update()}catch(e){$('notice').textContent=e.name==='AbortError'?'요청 결과를 확인하지 못했습니다. 상태를 확인한 뒤 다시 조작하세요.':e.message}}
+function rows(el,items){el.replaceChildren();for(const [k,v] of items){const tr=document.createElement('tr');for(const x of [k,v]){const td=document.createElement('td');td.textContent=x;tr.append(td)}el.append(tr)}}
+function seconds(n){return typeof n==='number'?n.toFixed(2)+'초':'미관측'}
+async function update(){try{const s=await request('/status');$('banner').textContent=(s.panic?'비상 정지 · ':s.paused?'일시 정지 · ':'대화 가능 · ')+s.operating_state+(s.muted?' · 음소거':'');rows($('state'),[['현재 단계',s.phase],['대기 입력',s.queue],['방송 모드',s.broadcast_mode],['VTube Studio',s.vts],['OBS',s.obs.state],['녹화',s.obs.recording===true?'녹화 중':s.obs.recording===false?'꺼짐':'미관측'],['송출',s.obs.streaming===true?'송출 중':s.obs.streaming===false?'꺼짐':'미관측'],['마지막 시작 검사',seconds(s.startup_check_age_seconds)+' 전']]);const m=s.observations.all_observed_outcomes;rows($('metrics'),[['최근 표본',s.observations.recent_sample_count],['첫 음성 중앙값',seconds(m.input_to_first_callback_seconds.median)],['첫 음성 p95',seconds(m.input_to_first_callback_seconds.p95)],['대기 p95',seconds(m.queue_seconds.p95)],['LLM p95',seconds(m.llm_seconds.p95)],['음성 합성 p95',seconds(m.tts_seconds.p95)]]);$('detail').textContent=JSON.stringify(s,null,2)}catch(e){$('banner').textContent='운영 화면 연결 끊김 · 로컬 콘솔 또는 OBS 음소거를 사용하세요.'}}
+document.querySelectorAll('[data-action]').forEach(b=>b.onclick=()=>command({action:b.dataset.action}));$('setmode').onclick=()=>command({action:'mode',value:$('mode').value});$('settopic').onclick=()=>command({action:'topic',value:$('topic').value});$('send').onclick=()=>command({action:'say',text:$('text').value});$('clearprivate').onclick=()=>{clearMemorySelection();$('user').value=''};
+$('user').oninput=clearMemorySelection;$('platform').onchange=clearMemorySelection;
+document.querySelectorAll('[data-memory]').forEach(b=>b.onclick=()=>command({action:'memory_'+b.dataset.memory,platform:$('platform').value,user:$('user').value,identity_verified:$('identity').checked,consent_verified:$('consent').checked,storage:$('storage').checked,retrieval:$('retrieval').checked,public:$('public').checked}));
+async function poll(){await update();setTimeout(poll,1000)}poll();
+</script></html>

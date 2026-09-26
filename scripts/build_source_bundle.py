@@ -19,16 +19,19 @@ ROOT_FILES = {
     ".gitattributes",
     "LICENSE",
     "LICENSE.md",
+    "start.cmd",
 }
 CONFIG_FILES = {
     "configs/app.example.yaml",
     "configs/character.yaml",
     "configs/performance-questions.json",
+    "configs/obs.example.json",
 }
 ENGINE_FILES = {"engines/stt/pyproject.toml", "engines/stt/uv.lock"}
+EXAMPLE_FILES = {"examples/rag/knowledge.json", "examples/rag/memory-candidate.json"}
 VENDOR_LICENSES = {"src/virtual_ai/integrations/_youtube_proto/LICENSE-2.0.txt"}
 EXTENSIONS = {
-    "src": {".py", ".md", ".sql", ".proto"},
+    "src": {".py", ".md", ".sql", ".proto", ".html"},
     "tests": {".py", ".json"},
     "scripts": {".py", ".ps1"},
     "docs": {".md"},
@@ -56,8 +59,10 @@ def allowed(name):
         )
     ):
         return False
-    return name in ROOT_FILES | CONFIG_FILES | ENGINE_FILES | VENDOR_LICENSES or (
-        path.parts[0] in EXTENSIONS and path.suffix in EXTENSIONS[path.parts[0]]
+    return (
+        name
+        in ROOT_FILES | CONFIG_FILES | ENGINE_FILES | EXAMPLE_FILES | VENDOR_LICENSES
+        or (path.parts[0] in EXTENSIONS and path.suffix in EXTENSIONS[path.parts[0]])
     )
 
 
@@ -87,6 +92,7 @@ def build(root, output):
         "configs/app.example.yaml",
         "src/virtual_ai/app.py",
     }
+    required |= EXAMPLE_FILES
     if not required <= files.keys():
         raise ValueError("incomplete source")
     manifest = {

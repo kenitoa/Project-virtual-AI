@@ -114,6 +114,16 @@ def build_messages(
         offset = 2 if dialogue_context else 1
         while len(messages) > offset + 1 and estimate_tokens(messages) > budget:
             del messages[offset : offset + 2]
+        if estimate_tokens(messages) > budget and character.get("examples"):
+            # Current evidence/delivery state outranks optional character examples.
+            # Identity, situation rules and all system safety instructions survive.
+            compact = dict(character)
+            compact.pop("examples")
+            compact_text = json.dumps(compact, ensure_ascii=False)
+            messages[0]["content"] = messages[0]["content"].replace(
+                character_text, compact_text, 1
+            )
+            without_dialogue = without_dialogue.replace(character_text, compact_text, 1)
         if dialogue_context and estimate_tokens(messages) > budget:
             del messages[1]
             messages[0]["content"] = without_dialogue

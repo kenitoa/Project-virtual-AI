@@ -11,6 +11,7 @@ class RAGSettings:
     knowledge_enabled: bool = True
     memory_enabled: bool = False
     capture_candidates: bool = False
+    question_coverage: bool = False
     db_path: str = ".local/rag.sqlite3"
     scope: str = "local"
     top_k: int = 3
@@ -31,6 +32,7 @@ class RAGSettings:
             "knowledge_enabled",
             "memory_enabled",
             "capture_candidates",
+            "question_coverage",
         ):
             if type(getattr(self, name)) is not bool:
                 raise ValueError("rag boolean required: " + name)

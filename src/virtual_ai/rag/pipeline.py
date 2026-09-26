@@ -244,6 +244,15 @@ class RAGPipeline:
                         + row["text"]
                     )
             answer = " ".join(selected)
+            if self.settings.question_coverage and evidence.plan.kind == "knowledge":
+                from virtual_ai.rag.coverage import coverage, missing_notice
+
+                result = coverage(evidence.plan.query, [sources[i] for i in seen])
+                self.last["coverage"] = result
+                if result["requested"] and not result["covered"]:
+                    return FALLBACKS["unsupported"], "unsupported"
+                if result["missing"]:
+                    answer += " " + missing_notice(result)
             # Truncation must not remove an exception or reverse a statement.
             from virtual_ai.safety import prepare_response
 

@@ -83,11 +83,11 @@ class YouTubeChat:
         if not valid:
             raise ChatError("Invalid text chat event.")
         age = (datetime.now(timezone.utc) - published).total_seconds()
-        if self._started_at is not None and published.timestamp() < self._started_at:
+        if self._started_at is not None and published.timestamp() <= self._started_at:
             return None
         if (
             self.accept_after is not None
-            and published.timestamp() < self.accept_after()
+            and published.timestamp() <= self.accept_after()
         ):
             return None
         if not -30 <= age <= self.max_age:

@@ -86,13 +86,17 @@ def test_subprocess_success_error_timeout_and_cancel(tmp_path, monkeypatch):
     monkeypatch.setattr(module.asyncio, "create_subprocess_exec", launch)
 
     async def run():
-        client = ProcessSTT(sys.executable, tmp_path, timeout=0.3)
+        # Interpreter startup is not the timeout case under test; it can exceed
+        # 300 ms on a loaded Windows machine or a fresh Python installation.
+        client = ProcessSTT(sys.executable, tmp_path, timeout=5)
         path = audio(tmp_path)
         assert await client.transcribe(path) == "/quit"
         with pytest.raises(STTError, match="engine_failed"):
             await client.transcribe(path)
+        client.timeout = 0.05
         with pytest.raises(STTError, match="timeout"):
             await client.transcribe(path)
+        client.timeout = 5
         task = asyncio.create_task(client.transcribe(path))
         while len(processes) < 4:
             await asyncio.sleep(0.01)

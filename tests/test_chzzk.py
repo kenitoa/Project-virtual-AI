@@ -178,6 +178,12 @@ def test_message_boundaries_and_operator_commands_remain_data():
         chat.message({**event, "channelId": "b" * 32})
     chat.accept_after = lambda: 1001
     assert chat.message({**event, "content": "new"}) is None
+    assert (
+        chat.message({**event, "content": "boundary", "messageTime": 1001000}) is None
+    )
+    assert (
+        chat.message({**event, "content": "after", "messageTime": 1001001}) is not None
+    )
 
 
 def test_socket_subscription_then_event_and_revocation():
@@ -215,7 +221,7 @@ def test_socket_subscription_then_event_and_revocation():
                         "channelId": CHANNEL,
                         "senderChannelId": "viewer",
                         "content": "hi",
-                        "messageTime": 1000000,
+                        "messageTime": 1001000,
                     },
                 ),
                 packet("SYSTEM", {"type": "revoked", "data": {}}),

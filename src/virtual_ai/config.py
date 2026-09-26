@@ -218,10 +218,15 @@ class TTSSettings:
     total_timeout_seconds: float = 120
     max_text_chars: int = 1000
     max_response_bytes: int = 20 * 1024 * 1024
+    pronunciations: dict = field(default_factory=dict)
 
     def __post_init__(self):
         if type(self.enabled) is not bool:
             raise ValueError("tts.enabled must be a boolean")
+        from virtual_ai.speech import validate_pronunciations
+
+        validate_pronunciations(self.pronunciations)
+        object.__setattr__(self, "pronunciations", dict(self.pronunciations))
         _validate_base_url(self.base_url)
         for name in ("ref_audio_path", "prompt_text", "prompt_lang", "text_lang"):
             value = getattr(self, name)

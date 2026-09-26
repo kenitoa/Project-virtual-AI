@@ -36,6 +36,7 @@ from virtual_ai.memory.recent import RecentHistory
 from virtual_ai.memory.retrieval import MemoryContext
 from virtual_ai.memory.sqlite_store import SQLiteStore
 from virtual_ai.memory.summarizer import summarize
+from virtual_ai.operations import Observations
 from virtual_ai.prompting import build_messages, load_system_prompt
 from virtual_ai.rag.pipeline import FALLBACKS as RAG_FALLBACKS
 from virtual_ai.rag.pipeline import RAGPipeline
@@ -81,6 +82,11 @@ class Application:
         )
         self.health_checks = tuple(health_checks)
         self._component_faults = {}
+        self.observations = Observations()
+        self.last_delivery = {}
+        self.obs = None
+        self.warmup_status = {"status": "not_requested"}
+        self.health_checked_at = monotonic() if health_checks else None
         self.disabled_features = {
             c.component for c in health_checks if c.status == RECOVERY
         }
@@ -146,12 +152,24 @@ class Application:
     def _discard(self, item, reason):
         receipt = self._receipts.pop(id(item), None)
         if receipt is not None:
-            ResponseTrace(*receipt).mark("discard", status=reason)
+            self._trace(*receipt).mark("discard", status=reason)
+
+    def _trace(self, response_id, received):
+        return ResponseTrace(response_id, received, self.observations.observe)
+
+    async def set_mode(self, mode):
+        if mode not in ("talk", "busy", "focus", "quiet"):
+            raise ValueError("invalid broadcast mode")
+        if not self.dialogue:
+            raise ValueError("broadcast modes require dialogue planning")
+        self.runtime.broadcast_mode = mode
+        # Prevent an answer selected under the old policy from arriving later.
+        await self.stop()
 
     def submit(self, item):
         # External text and IDs never enter telemetry.
         stamp, response_id = monotonic(), str(uuid4())
-        trace = ResponseTrace(response_id, stamp)
+        trace = self._trace(response_id, stamp)
         trace.mark("received", at=stamp)
         if self._closed or self.runtime.input_locked:
             self._input_drops["input_locked"] += 1
@@ -270,6 +288,8 @@ class Application:
         return True
 
     def status(self):
+        if self.obs and self.obs.observed.get("state") == "unavailable":
+            self._component_faults["obs"] = "connection_or_mapping_failed"
         queue_length = len(self.queue)  # Expire before reporting discard aggregates.
         drops = dict(self.queue.dropped)
         for reason, count in self._input_drops.items():
@@ -288,6 +308,12 @@ class Application:
         ):
             operating_state = RECOVERY
         return {
+            "broadcast_mode": self.runtime.broadcast_mode,
+            "observations": self.observations.snapshot(),
+            "delivery": dict(self.last_delivery),
+            "startup_check_age_seconds": None
+            if self.health_checked_at is None
+            else max(0, monotonic() - self.health_checked_at),
             "operating_state": operating_state,
             "component_faults": dict(self._component_faults),
             "microphone": self.microphone.state if self.microphone else "disabled",
@@ -354,8 +380,8 @@ class Application:
         """Operator/runtime values only; viewer text never calls this method."""
         from virtual_ai.memory.sqlite_store import _text
 
-        if key not in ("game", "title"):
-            raise ValueError("allowed state keys: game, title")
+        if key not in ("game", "title", "topic"):
+            raise ValueError("allowed state keys: game, title, topic")
         self.broadcast_state[key] = _text(value, 200)
 
     async def forget_long(self):
@@ -479,7 +505,7 @@ class Application:
             response_id, received = self._receipts.pop(
                 id(item), (str(uuid4()), submitted_at)
             )
-            trace = ResponseTrace(response_id, received)
+            trace = self._trace(response_id, received)
             trace.mark("selected")
             deadline = None
             if self.dialogue and item.viewer.platform != "console":
@@ -495,6 +521,7 @@ class Application:
             playback = "not_started"
             response = None
             turn = None
+            used_rows = []
             try:
                 logger.info(
                     "response_id=%s queue_seconds=%.6f",
@@ -515,6 +542,9 @@ class Application:
                         try:
                             turn = self.dialogue.prepare(
                                 item,
+                                mode=self.runtime.broadcast_mode,
+                                public_topic=self.broadcast_state.get("topic", ""),
+                                backlog=len(self.queue),
                                 age=max(
                                     monotonic() - submitted_at,
                                     time() - item.published_at
@@ -625,9 +655,14 @@ class Application:
                                 monotonic()
                                 + self.dialogue.policy.generation_timeout_seconds,
                             )
-                            async with asyncio.timeout_at(end):
+                            async with asyncio.timeout(
+                                max(0, end - monotonic())
+                            ) as generation_timeout:
                                 raw = await self._generation
-                            if monotonic() >= end:
+                            # A loop may deliver its timer up to one clock tick
+                            # early. The timeout's state remains authoritative if
+                            # an adapter suppressed the cancellation and returned.
+                            if generation_timeout.expired() or monotonic() >= end:
                                 raise TimeoutError
                     trace.mark(
                         "llm_complete",
@@ -746,7 +781,18 @@ class Application:
                     return None
                 self.output(response.final)
                 displayed = True
+                trace.mark("console_displayed")
                 self._update_subtitle(response)
+                self.last_delivery = {
+                    "console_displayed": True,
+                    "subtitle_file_written": self.subtitles is not None
+                    and "subtitles" not in self._component_faults,
+                    "obs_display": "unobserved",
+                    "playback": "pending"
+                    if self._voice_enabled and not self.runtime.muted
+                    else "not_started",
+                    "listener_received": "unknown",
+                }
                 if not response.blocked:
                     self.history.add(item.viewer, item.text, response.final)
                     if turn:
@@ -754,14 +800,17 @@ class Application:
                         used_ids = (
                             self.rag.last.get("used_source_ids", []) if self.rag else []
                         )
+                        used_rows = (
+                            [r for r in evidence.rows if r["id"] in used_ids]
+                            if evidence
+                            else []
+                        )
                         self.dialogue.record(
                             item.viewer,
                             item.text,
                             turn,
                             response.final,
-                            used_rows=[r for r in evidence.rows if r["id"] in used_ids]
-                            if evidence
-                            else [],
+                            used_rows=used_rows,
                         )
                     if self.rag:
                         self.rag.capture(
@@ -799,6 +848,18 @@ class Application:
                         self.runtime.phase = "idle"
                 return response
             finally:
+                if displayed:
+                    self.last_delivery["playback"] = playback
+                    if self.dialogue and not response.blocked:
+                        delivery = (
+                            "text_only"
+                            if playback == "not_started"
+                            and (not self._voice_enabled or self.runtime.muted)
+                            else playback
+                        )
+                        self.dialogue.delivered(
+                            item.viewer, delivery, used_rows=used_rows
+                        )
                 if self.rag and displayed:
                     await self.rag.delivery(
                         item.viewer, response_id, displayed, playback
@@ -847,7 +908,17 @@ class Application:
             started = monotonic()
             try:
                 self.runtime.phase = "tts"
-                await self.tts.synthesize(response.speech, destination)
+                if trace:
+                    trace.mark("tts_started")
+                from virtual_ai.safety import check_output
+                from virtual_ai.speech import pronunciation
+
+                spoken = pronunciation(
+                    response.speech, self.settings.tts.pronunciations
+                )
+                if not check_output(spoken, self.settings.blocked_terms):
+                    raise TTSError("pronunciation_output_rejected")
+                await self.tts.synthesize(spoken, destination)
                 if trace is not None:
                     trace.mark("tts_complete")
                 self._component_faults.pop("tts", None)
@@ -1045,6 +1116,9 @@ async def run_cli(args):
     from virtual_ai.schemas import ChatInput, Viewer
 
     settings, character = load_config(Path(args.config).resolve())
+    report_path = getattr(args, "session_report", None)
+    if report_path and Path(report_path).exists():
+        raise ValueError("session report already exists")
     if getattr(args, "rag_db", None):
         settings = replace(
             settings,
@@ -1059,6 +1133,17 @@ async def run_cli(args):
         settings = replace(settings, backend=args.backend)
     if getattr(args, "dialogue", False):
         settings = replace(settings, dialogue=replace(settings.dialogue, enabled=True))
+    if getattr(args, "responsive", False):
+        settings = replace(
+            settings,
+            dialogue=replace(
+                settings.dialogue,
+                enabled=True,
+                fast_reactions=True,
+                shared_context=True,
+            ),
+            rag=replace(settings.rag, question_coverage=True),
+        )
     health_checks = ()
     if getattr(args, "local_only", False):
         settings = replace(
@@ -1165,7 +1250,47 @@ async def run_cli(args):
                 app.microphone = MicrophoneInput(app, client, args.microphone_device)
             except (STTError, TypeError):
                 app._component_faults["microphone"] = "invalid_configuration"
+        if report_path:
+            from virtual_ai.session_report import fingerprint, write_report
+
+            identity = await asyncio.to_thread(fingerprint, app)
+            resources.callback(write_report, report_path, app, identity)
+        if getattr(args, "obs_config", None):
+            if app.subtitles is None:
+                raise ValueError("OBS refresh requires enabled subtitles")
+            from virtual_ai.integrations.obs import OBS, OBSError
+
+            obs = app.obs = OBS(args.obs_config, settings.subtitles.path)
+            resources.push_async_callback(obs.aclose)
+            try:
+                await obs.start()
+                monitor = asyncio.create_task(obs.monitor())
+
+                async def stop_monitor():
+                    monitor.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await monitor
+                    if obs.observed.get("state") != "unavailable":
+                        with suppress(Exception):
+                            await obs.refresh()
+
+                resources.push_async_callback(stop_monitor)
+            except OBSError:
+                obs.observed["state"] = "unavailable"
+                app._component_faults["obs"] = "connection_or_mapping_failed"
         resources.push_async_callback(app.shutdown)
+        if getattr(args, "warmup_tts", False):
+            from virtual_ai.session_report import warmup
+
+            app.warmup_status = await warmup(app)
+            logger.info("tts_warmup=%s", app.warmup_status["status"])
+        if getattr(args, "operator_panel", False):
+            from virtual_ai.operator_panel import OperatorPanel
+
+            panel = OperatorPanel(app)
+            url = await panel.start(getattr(args, "operator_port", 0))
+            resources.push_async_callback(panel.aclose)
+            print("운영 화면: " + url, flush=True)
         if getattr(args, "benchmark", None):
             from virtual_ai.performance import benchmark
 
@@ -1241,6 +1366,34 @@ def main():
     )
     parser.add_argument("--config", default="configs/app.example.yaml")
     parser.add_argument("--local-only", action="store_true")
+    parser.add_argument(
+        "--responsive",
+        action="store_true",
+        help="Enable fast reactions, scoped public topics and explicit RAG question coverage",
+    )
+    parser.add_argument(
+        "--operator-panel",
+        action="store_true",
+        help="Local authenticated operator dashboard",
+    )
+    parser.add_argument(
+        "--operator-port",
+        type=int,
+        default=0,
+        help="Loopback dashboard port; 0 chooses a free port",
+    )
+    parser.add_argument(
+        "--warmup-tts",
+        action="store_true",
+        help="Synthesize fixed warmup without playing sound",
+    )
+    parser.add_argument(
+        "--obs-config",
+        help="Local OBS refresh configuration; no recording/streaming actions",
+    )
+    parser.add_argument(
+        "--session-report", help="Exclusive content-free session evidence JSON path"
+    )
     parser.add_argument("--operator-session-id", help=argparse.SUPPRESS)
     parser.add_argument("--backend", choices=("mock", "fake", "koboldcpp"))
     parser.add_argument(
@@ -1277,6 +1430,8 @@ def main():
         parser.error("--local-only cannot be combined with --live")
     if args.benchmark and (args.once is not None or args.live):
         parser.error("benchmark cannot be combined with --once or --live")
+    if args.benchmark and args.operator_panel:
+        parser.error("benchmark requires isolated input; disable the operator panel")
     if args.live and args.once is not None:
         parser.error("--live cannot be combined with --once")
     logging.basicConfig(

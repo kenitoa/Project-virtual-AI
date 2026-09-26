@@ -1,5 +1,9 @@
 # Project-virtual-AI
 
+현재 구현·실제 검증·남은 수용 조건은 [프로젝트 현재 상태](docs/project-status.md)를 기준으로 확인합니다.
+운영 화면·발화 모드·전달 상태·지연 측정·OBS 갱신 등 [15개 보완 반영](docs/project-improvements-2026-09-26.md).
+외부 엔진 준비 후 `start.cmd`로 로컬 리허설을 실행할 수 있습니다.
+
 v1.0의 필수 범위, 단계별 검증 순서와 후속 확장은 [v1.0 완료 기준](docs/v1-completion.md)을 따릅니다.
 
 선택적 LLM·RAG 검색, 근거 검증, 시청자 기억 후보 승인·삭제와 운영 명령은
@@ -12,14 +16,14 @@ v1.0의 필수 범위, 단계별 검증 순서와 후속 확장은 [v1.0 완료 
 Windows 설치·실행·정상/비상 종료는 [운영 안내](docs/operator-guide.md)를 따릅니다.
 업데이트 전에는 [복구·DB 백업](docs/recovery.md), [설정·보관 정책](docs/privacy-and-retention.md)을 확인합니다.
 변경 내역은 [CHANGELOG](CHANGELOG.md)에 기록하며 현재는 Unreleased입니다.
-제한된 실제 방송은 [수용 절차](docs/live-acceptance.md)와 [결과 양식](docs/live-acceptance-record-template.md)을 사용합니다. 현재 실제 검증은 준비 대기입니다.
+제한된 실제 방송은 [수용 절차](docs/live-acceptance.md)와 [결과 양식](docs/live-acceptance-record-template.md)을 사용합니다. 로컬 장치 검증과 공개 방송 수용은 구분합니다.
 
 Python 기반 버추얼 AI 제어 프로그램의 초기 구성입니다.
 현재 mock 모드는 외부 서버·네트워크 호출·GPU 없이 고정 답변을 반환합니다.
 KoboldCpp 연결과 제한된 최근 대화 기록, GPT-SoVITS WAV 저장·재생 및 답변의 음성 출력을 지원합니다.
-음성 합성·재생 중지와 텍스트 대화 유지가 구현되어 있으며, 실제 청취 검증은 진행 중입니다.
+음성 합성·재생 중지와 텍스트 대화 유지가 구현되어 있으며, 기존 실제 스피커 청취는 정상 확인됐습니다.
 선택적 VTube Studio 표정·립싱크, OBS 파일 자막, YouTube 채팅 수신 코드는 구현되어 있습니다.
-실제 모델·녹화·채팅 수신 검증은 대기입니다. [검증 현황](docs/validation-status.md)을 참고하세요.
+실제 모델·OBS 녹화·VTS 연결은 제한된 로컬 검증을 통과했습니다. 실제 시청자 수신·발화와 장시간 수용은 남아 있습니다.
 
 방송 실행에는 `--live`를 사용합니다. YouTube 수신 활성화 시에도 기본 일시 정지로 시작합니다.
 `/pause`, `/resume`, `/mute`, `/unmute`, `/status`, `/panic`, `/recover`의 동작과

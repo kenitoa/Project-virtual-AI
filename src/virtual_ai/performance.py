@@ -121,6 +121,11 @@ def summarize(rows):
         names = sorted({key for row in normal for key in row["metrics"]})
         result[phase] = {
             "outcomes": dict(Counter(r["status"] for r in subset)),
+            "all_observed": {
+                name: stats([r["metrics"].get(name) for r in subset])
+                for name in sorted({key for row in subset for key in row["metrics"]})
+            },
+            "non_success_rate": (len(subset) - len(normal)) / len(subset),
             "normal_only": {
                 name: stats([r["metrics"].get(name) for r in normal]) for name in names
             },
@@ -146,7 +151,7 @@ async def benchmark(app, args):
         raise ValueError("benchmark requires 1..20 bounded questions")
     if (
         not 2 <= args.benchmark_rounds <= 100
-        or not 0 <= args.benchmark_soak_seconds <= 3600
+        or not 0 <= args.benchmark_soak_seconds <= 14400
     ):
         raise ValueError("invalid benchmark workload")
     if (
@@ -175,7 +180,7 @@ async def benchmark(app, args):
     run_cpu_started = time.process_time()
     try:
         round_index = 0
-        while round_index < 1000 and (
+        while round_index < 100000 and (
             round_index < args.benchmark_rounds
             or (
                 args.benchmark_soak_seconds > 0
@@ -266,7 +271,7 @@ async def benchmark(app, args):
                 or any(r["phase"] == "post_soak" for r in rows)
             ):
                 break
-            await asyncio.sleep(0)
+            await asyncio.sleep(0.1 if args.benchmark_soak_seconds else 0)
     finally:
         logger.propagate = previous_propagate
         logger.setLevel(previous_level)

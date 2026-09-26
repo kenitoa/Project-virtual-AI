@@ -149,7 +149,14 @@ def test_old_public_question_is_dropped_before_model_but_console_is_not():
         {"generation_timeout_seconds": 0.02},
     ],
 )
-def test_even_adapter_suppressing_cancellation_cannot_display_expired_answer(limits):
+@pytest.mark.parametrize("frozen_clock", [False, True])
+def test_even_adapter_suppressing_cancellation_cannot_display_expired_answer(
+    limits, frozen_clock, monkeypatch
+):
+    if frozen_clock:
+        now = monotonic()
+        monkeypatch.setattr("virtual_ai.app.monotonic", lambda: now)
+
     class LateLLM(QuoteLLM):
         async def generate(self, messages):
             try:

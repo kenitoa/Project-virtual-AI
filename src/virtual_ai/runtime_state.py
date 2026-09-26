@@ -14,6 +14,7 @@ class RuntimeState:
     voice_epoch: int = 0
     phase: str = "idle"
     accept_after: float = 0.0
+    broadcast_mode: str = "talk"
 
     @property
     def input_locked(self):

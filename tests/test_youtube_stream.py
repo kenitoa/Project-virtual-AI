@@ -302,7 +302,8 @@ def test_stream_pause_cutoff_keeps_cursor_and_drops_delayed_message():
         async def source(request, token):
             yield page()
             old = message("during-pause", age=0)
-            cutoff[0] = datetime.now(timezone.utc).timestamp()
+            # Coarse platform clocks may make an old message equal to resume.
+            cutoff[0] = datetime.fromisoformat(old.snippet.published_at).timestamp()
             yield page(old, message("fresh"), ended=True)
 
         got = []
